@@ -175,7 +175,8 @@
     .setup-ex-info { flex: 1; }
     .setup-ex-name { font-size: 15px; font-weight: 700; }
     .setup-ex-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
-    .setup-ex-last { font-size: 11px; color: var(--accent); margin-top: 3px; font-weight: 600; }
+    .setup-ex-sets { font-size: 11px; color: var(--muted); margin-top: 3px; }
+    .setup-ex-last { font-size: 11px; color: var(--accent); margin-top: 2px; font-weight: 600; }
     .swap-btn {
       background: var(--card2);
       border: 1px solid var(--border);
@@ -1106,11 +1107,16 @@ function renderSetup() {
     const exId = selectedSlots[i];
     const ex   = EX[exId];
     const lastW = getLastWeightForExercise(exId);
+    const workSets = ex.sets.filter(s => s.type === 'work');
+    const warmSets = ex.sets.filter(s => s.type === 'warmup');
+    const setsLabel = `${workSets.length} working set${workSets.length !== 1 ? 's' : ''} × ${workSets[0].reps} reps`;
+    const warmLabel = warmSets.length ? ` · ${warmSets.length} warm-up` : '';
     return `
       <div class="setup-exercise-row ${slot.fixed ? 'is-fixed' : ''}">
         <div class="setup-ex-info">
           <div class="setup-ex-name">${ex.name}</div>
           <div class="setup-ex-meta">${ex.muscle}</div>
+          <div class="setup-ex-sets">${setsLabel}${warmLabel}</div>
           ${lastW !== null
             ? `<div class="setup-ex-last">Last: ${lastW}lb</div>`
             : `<div class="setup-ex-last" style="color:var(--muted)">No history yet</div>`}
