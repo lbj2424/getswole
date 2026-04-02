@@ -224,6 +224,7 @@
       align-items: center;
     }
     .set-row:last-child { border-bottom: none; }
+    .set-feedback { min-height: 0; transition: all 0.2s; }
     .set-num { font-size: 12px; color: var(--muted); font-weight: 700; }
     .set-input {
       background: var(--card2);
@@ -599,8 +600,7 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 // ─── MASTER EXERCISE LIBRARY ──────────────────────────────────────────────────
-// Each exercise has: name, note, muscle, and a default set template.
-// Weights here are STARTING defaults — auto-fill from history overrides them.
+// increment = how many lbs to add when progressing this exercise.
 
 const EX = {
 
@@ -609,6 +609,7 @@ const EX = {
     name: "Leg Press",
     muscle: "Quads · Glutes",
     note: "Primary strength lift. Full depth, drive through heels.",
+    increment: 10,
     sets: [
       { type:"warmup",  reps:10, weight:270, targetRPE:"easy",   label:"Warm-up" },
       { type:"work",    reps:5,  weight:365, targetRPE:"hard",   label:"Set 1" },
@@ -621,6 +622,7 @@ const EX = {
     name: "Hack Slide",
     muscle: "Quads",
     note: "1–2 inches from absolute bottom. Controlled descent.",
+    increment: 5,
     sets: [
       { type:"work", reps:8, weight:120, targetRPE:"medium", label:"Set 1" },
       { type:"work", reps:8, weight:120, targetRPE:"medium", label:"Set 2" },
@@ -631,6 +633,7 @@ const EX = {
     name: "Bulgarian Split Squat",
     muscle: "Quads · Glutes",
     note: "Rear foot elevated. Dumbbells at sides. Deep range of motion.",
+    increment: 2.5,
     sets: [
       { type:"work", reps:8, weight:25, targetRPE:"medium", label:"Set 1 (ea.)" },
       { type:"work", reps:8, weight:25, targetRPE:"medium", label:"Set 2 (ea.)" },
@@ -641,6 +644,7 @@ const EX = {
     name: "Goblet Squat",
     muscle: "Quads · Core",
     note: "Hold dumbbell at chest. Sit into the squat. Heels down.",
+    increment: 5,
     sets: [
       { type:"work", reps:10, weight:50, targetRPE:"medium", label:"Set 1" },
       { type:"work", reps:10, weight:50, targetRPE:"medium", label:"Set 2" },
@@ -651,6 +655,7 @@ const EX = {
     name: "Seated Leg Curl",
     muscle: "Hamstrings",
     note: "2-second squeeze at curl. Slow lower.",
+    increment: 5,
     sets: [
       { type:"work", reps:10, weight:120, targetRPE:"medium", label:"Set 1" },
       { type:"work", reps:10, weight:120, targetRPE:"medium", label:"Set 2" },
@@ -661,6 +666,7 @@ const EX = {
     name: "Romanian Deadlift",
     muscle: "Hamstrings · Glutes",
     note: "Barbell. Push hips back. Feel the stretch. Soft knees.",
+    increment: 5,
     sets: [
       { type:"work", reps:8, weight:135, targetRPE:"medium", label:"Set 1" },
       { type:"work", reps:8, weight:135, targetRPE:"medium", label:"Set 2" },
@@ -671,6 +677,7 @@ const EX = {
     name: "Leg Extension",
     muscle: "Quads (isolation)",
     note: "1-second hold at top. Controlled descent.",
+    increment: 5,
     sets: [
       { type:"work", reps:12, weight:155, targetRPE:"medium", label:"Set 1" },
       { type:"work", reps:12, weight:155, targetRPE:"medium", label:"Set 2" },
@@ -681,6 +688,7 @@ const EX = {
     name: "Hip Abduction",
     muscle: "Glutes · Abductors",
     note: "3-second pause at sides. Slow and controlled.",
+    increment: 5,
     sets: [
       { type:"work", reps:12, weight:200, targetRPE:"medium", label:"Set 1" },
       { type:"work", reps:12, weight:200, targetRPE:"medium", label:"Set 2" },
@@ -691,6 +699,7 @@ const EX = {
     name: "Standing Calf Raises",
     muscle: "Calves",
     note: "4-second pause at top. Full stretch at bottom.",
+    increment: 5,
     sets: [
       { type:"work", reps:14, weight:130, targetRPE:"medium", label:"Set 1" },
       { type:"work", reps:14, weight:130, targetRPE:"medium", label:"Set 2" },
@@ -701,6 +710,7 @@ const EX = {
     name: "Cable Kickback",
     muscle: "Glutes",
     note: "Slow and controlled. Squeeze glute at top. Don't swing.",
+    increment: 2.5,
     sets: [
       { type:"work", reps:12, weight:20, targetRPE:"medium", label:"Set 1 (ea.)" },
       { type:"work", reps:12, weight:20, targetRPE:"medium", label:"Set 2 (ea.)" },
@@ -713,6 +723,7 @@ const EX = {
     name: "Weighted Pull-Ups",
     muscle: "Lats · Biceps",
     note: "Primary lift. Full hang. Chin over bar. Shoulder-width grip.",
+    increment: 2.5,
     sets: [
       { type:"work",    reps:5, weight:15, targetRPE:"hard",   label:"Set 1 (+15lb)" },
       { type:"work",    reps:5, weight:15, targetRPE:"hard",   label:"Set 2 (+15lb)" },
@@ -724,6 +735,7 @@ const EX = {
     name: "Cable Row",
     muscle: "Mid Back · Lats",
     note: "2–3s eccentric. 1-second squeeze at chest. No swinging.",
+    increment: 5,
     sets: [
       { type:"work", reps:8, weight:130, targetRPE:"medium", label:"Set 1" },
       { type:"work", reps:8, weight:130, targetRPE:"medium", label:"Set 2" },
@@ -734,6 +746,7 @@ const EX = {
     name: "Chest-Supported Row",
     muscle: "Mid Back · Rear Delts",
     note: "Chest on pad. No momentum. Pull elbows back and squeeze.",
+    increment: 2.5,
     sets: [
       { type:"work", reps:8, weight:45, targetRPE:"medium", label:"Set 1 (ea.)" },
       { type:"work", reps:8, weight:45, targetRPE:"medium", label:"Set 2 (ea.)" },
@@ -744,6 +757,7 @@ const EX = {
     name: "Lat Pulldown",
     muscle: "Lats",
     note: "Neutral or supinated grip. Pull to upper chest. Controlled return.",
+    increment: 5,
     sets: [
       { type:"work", reps:8, weight:130, targetRPE:"medium", label:"Set 1" },
       { type:"work", reps:8, weight:130, targetRPE:"medium", label:"Set 2" },
@@ -754,6 +768,7 @@ const EX = {
     name: "Single-Arm DB Row",
     muscle: "Lats · Mid Back",
     note: "Brace on bench. Pull elbow to hip. Full stretch at bottom.",
+    increment: 5,
     sets: [
       { type:"work", reps:8, weight:60, targetRPE:"medium", label:"Set 1 (ea.)" },
       { type:"work", reps:8, weight:60, targetRPE:"medium", label:"Set 2 (ea.)" },
@@ -764,6 +779,7 @@ const EX = {
     name: "Barbell Curl (Wide Grip)",
     muscle: "Biceps",
     note: "No swinging. Full control. Squeeze at top.",
+    increment: 5,
     sets: [
       { type:"warmup", reps:8, weight:50, targetRPE:"easy",   label:"Warm-up" },
       { type:"work",   reps:5, weight:80, targetRPE:"hard",   label:"Top Set" },
@@ -775,6 +791,7 @@ const EX = {
     name: "EZ Bar Curl",
     muscle: "Biceps",
     note: "Easier on wrists than straight bar. Control both directions.",
+    increment: 5,
     sets: [
       { type:"warmup", reps:8, weight:45, targetRPE:"easy",   label:"Warm-up" },
       { type:"work",   reps:6, weight:75, targetRPE:"hard",   label:"Top Set" },
@@ -786,6 +803,7 @@ const EX = {
     name: "Incline DB Curl",
     muscle: "Biceps (long head)",
     note: "Sit back on incline bench. Arms hang straight. Full stretch.",
+    increment: 2.5,
     sets: [
       { type:"work", reps:8, weight:25, targetRPE:"medium", label:"Set 1 (ea.)" },
       { type:"work", reps:8, weight:25, targetRPE:"medium", label:"Set 2 (ea.)" },
@@ -796,6 +814,7 @@ const EX = {
     name: "Hammer Curls",
     muscle: "Biceps · Forearms",
     note: "Neutral grip. 2–3s eccentric. Builds brachialis and forearm.",
+    increment: 2.5,
     sets: [
       { type:"work", reps:8, weight:30, targetRPE:"medium", label:"Set 1 (ea.)" },
       { type:"work", reps:8, weight:30, targetRPE:"medium", label:"Set 2 (ea.)" },
@@ -806,6 +825,7 @@ const EX = {
     name: "Concentration Curl",
     muscle: "Biceps (peak)",
     note: "Elbow braced on inner thigh. Full range. Squeeze at top.",
+    increment: 2.5,
     sets: [
       { type:"work", reps:10, weight:30, targetRPE:"medium", label:"Set 1 (ea.)" },
       { type:"work", reps:10, weight:30, targetRPE:"medium", label:"Set 2 (ea.)" },
@@ -816,6 +836,7 @@ const EX = {
     name: "Cable Curl",
     muscle: "Biceps",
     note: "Constant tension. Elbows fixed at sides. Slow and controlled.",
+    increment: 5,
     sets: [
       { type:"work", reps:10, weight:40, targetRPE:"medium", label:"Set 1" },
       { type:"work", reps:10, weight:40, targetRPE:"medium", label:"Set 2" },
@@ -828,6 +849,7 @@ const EX = {
     name: "Incline Bench Press",
     muscle: "Upper Chest · Shoulders",
     note: "Primary lift. No spotter — stop 1 rep shy of failure.",
+    increment: 5,
     sets: [
       { type:"warmup", reps:10, weight:50,  targetRPE:"easy",   label:"Warm-up 1" },
       { type:"warmup", reps:6,  weight:70,  targetRPE:"easy",   label:"Warm-up 2" },
@@ -840,6 +862,7 @@ const EX = {
     name: "Chest Press Machine",
     muscle: "Chest",
     note: "Slow and controlled. Full range of motion.",
+    increment: 5,
     sets: [
       { type:"work", reps:8, weight:110, targetRPE:"medium", label:"Set 1" },
       { type:"work", reps:8, weight:110, targetRPE:"medium", label:"Set 2" },
@@ -850,6 +873,7 @@ const EX = {
     name: "Cable Fly",
     muscle: "Chest (inner)",
     note: "Set cables to chest height. Wide arc. Squeeze at center.",
+    increment: 2.5,
     sets: [
       { type:"work", reps:12, weight:30, targetRPE:"medium", label:"Set 1 (ea.)" },
       { type:"work", reps:12, weight:30, targetRPE:"medium", label:"Set 2 (ea.)" },
@@ -860,6 +884,7 @@ const EX = {
     name: "Shoulder Press Machine",
     muscle: "Shoulders",
     note: "Full range. Control the eccentric. Don't rush.",
+    increment: 5,
     sets: [
       { type:"work", reps:8, weight:60, targetRPE:"medium", label:"Set 1" },
       { type:"work", reps:8, weight:60, targetRPE:"medium", label:"Set 2" },
@@ -870,6 +895,7 @@ const EX = {
     name: "DB Shoulder Press",
     muscle: "Shoulders",
     note: "Seated or standing. Full range. Control the lowering phase.",
+    increment: 2.5,
     sets: [
       { type:"work", reps:8, weight:35, targetRPE:"medium", label:"Set 1 (ea.)" },
       { type:"work", reps:8, weight:35, targetRPE:"medium", label:"Set 2 (ea.)" },
@@ -880,6 +906,7 @@ const EX = {
     name: "Weighted Dips",
     muscle: "Triceps · Lower Chest",
     note: "Slight forward lean. Slow and controlled. +25lb.",
+    increment: 2.5,
     sets: [
       { type:"work", reps:8, weight:25, targetRPE:"medium", label:"Set 1 (+25lb)" },
       { type:"work", reps:8, weight:25, targetRPE:"medium", label:"Set 2 (+25lb)" },
@@ -890,6 +917,7 @@ const EX = {
     name: "Close Grip Bench Press",
     muscle: "Triceps · Chest",
     note: "Hands shoulder-width. Elbows tucked. Control the bar.",
+    increment: 5,
     sets: [
       { type:"warmup", reps:8,  weight:65,  targetRPE:"easy",   label:"Warm-up" },
       { type:"work",   reps:5,  weight:95,  targetRPE:"hard",   label:"Top Set" },
@@ -901,6 +929,7 @@ const EX = {
     name: "Tricep Press Machine",
     muscle: "Triceps",
     note: "Full extension. Don't lock out aggressively.",
+    increment: 5,
     sets: [
       { type:"work", reps:8, weight:150, targetRPE:"medium", label:"Set 1" },
       { type:"work", reps:8, weight:150, targetRPE:"medium", label:"Set 2" },
@@ -911,6 +940,7 @@ const EX = {
     name: "Cable Pushdown",
     muscle: "Triceps",
     note: "Rope or bar. Elbows locked at sides. Full extension.",
+    increment: 5,
     sets: [
       { type:"work", reps:10, weight:80, targetRPE:"medium", label:"Set 1" },
       { type:"work", reps:10, weight:80, targetRPE:"medium", label:"Set 2" },
@@ -921,6 +951,7 @@ const EX = {
     name: "Skull Crushers",
     muscle: "Triceps (long head)",
     note: "EZ bar or dumbbells. Lower to forehead. Full extension.",
+    increment: 2.5,
     sets: [
       { type:"warmup", reps:10, weight:45, targetRPE:"easy",   label:"Warm-up" },
       { type:"work",   reps:8,  weight:65, targetRPE:"medium", label:"Set 1" },
@@ -1228,14 +1259,15 @@ function renderWorkout() {
             value="${s.loggedReps}" placeholder="reps"
             onchange="updateSet(${ei},${si},'loggedReps',this.value)" />
           <select class="rpe-select ${s.rpe ? 'rpe-'+s.rpe : ''}" id="rpe-${ei}-${si}"
-            onchange="updateSet(${ei},${si},'rpe',this.value);styleRpe(${ei},${si},this.value)">
+            onchange="updateSet(${ei},${si},'rpe',this.value);styleRpe(${ei},${si},this.value,'${s.targetRPE}')">
             <option value="">RPE</option>
             <option value="easy"   ${s.rpe==='easy'  ?'selected':''}>Easy</option>
             <option value="medium" ${s.rpe==='medium'?'selected':''}>Medium</option>
             <option value="hard"   ${s.rpe==='hard'  ?'selected':''}>Hard</option>
             <option value="vhard"  ${s.rpe==='vhard' ?'selected':''}>V.Hard</option>
           </select>
-        </div>`).join('')}
+        </div>
+        <div class="set-feedback" id="fb-${ei}-${si}"></div>`).join('')}
     </div>`).join('');
 }
 
@@ -1248,9 +1280,16 @@ window.updateSet = function(ei, si, field, val) {
     (field === 'loggedWeight' || field === 'loggedReps') ? (parseFloat(val)||0) : val;
 };
 
-window.styleRpe = function(ei, si, val) {
+window.styleRpe = function(ei, si, val, targetRpe) {
   const s = document.getElementById(`rpe-${ei}-${si}`);
   s.className = `rpe-select${val ? ' rpe-'+val : ''}`;
+  const fb = document.getElementById(`fb-${ei}-${si}`);
+  if (!fb) return;
+  const info = getRpeFeedback(val, targetRpe);
+  fb.style.cssText = info
+    ? `padding:4px 16px 8px;font-size:11px;font-weight:600;color:${info.color}`
+    : '';
+  fb.textContent = info ? info.text : '';
 };
 
 window.cancelWorkout = function() {
@@ -1285,21 +1324,60 @@ window.finishWorkout = async function() {
 };
 
 // ─── PROGRESSION LOGIC ────────────────────────────────────────────────────────
+// Compares each set's actual RPE against its target RPE.
+// delta > 0 = harder than planned, delta < 0 = easier than planned.
+
 function getRecommendation(exerciseId, loggedSets) {
-  const workSets = loggedSets.filter(s => s.type === 'work' && s.rpe);
+  const workSets = loggedSets.filter(s => s.type === 'work' && s.rpe && s.targetRPE);
   if (!workSets.length) return null;
-  const avgRPE = workSets.reduce((a, s) => a + (RPE_VAL[s.rpe]||2), 0) / workSets.length;
+
+  const increment = EX[exerciseId]?.increment || 5;
+  const deltas = workSets.map(s => (RPE_VAL[s.rpe] || 2) - (RPE_VAL[s.targetRPE] || 2));
+  const avgDelta = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+  const aboveTarget = deltas.filter(d => d > 0).length;
+  const totalWork   = deltas.length;
+
   let action, reason;
-  if (avgRPE <= 1.5) {
-    action = 'increase'; reason = "Sets felt easy — add weight next session.";
-  } else if (avgRPE <= 2.5) {
-    action = 'increase'; reason = "Good control at medium effort — ready to progress.";
-  } else if (avgRPE <= 3.2) {
-    action = 'stay';    reason = "Hard but manageable — repeat same weight, aim for cleaner reps.";
+
+  if (avgDelta <= -1) {
+    // All/most sets easier than target — clear green light
+    action = 'increase';
+    reason = `Sets consistently below target effort — add ${increment}lb next session.`;
+  } else if (avgDelta < 0) {
+    // Trending easier
+    action = 'increase';
+    reason = `Trending easier than target — add ${increment}lb next session.`;
+  } else if (avgDelta === 0) {
+    // Perfectly on target — still progress
+    action = 'increase';
+    reason = `Right on target — add ${increment}lb next session.`;
+  } else if (avgDelta <= 0.5 || aboveTarget <= totalWork / 2) {
+    // Slightly above target on fewer than half the sets
+    action = 'stay';
+    reason = `A couple sets above target — repeat this weight and focus on cleaner reps.`;
+  } else if (avgDelta <= 1) {
+    // Most sets harder than planned
+    action = 'stay';
+    reason = `Most sets harder than target — stay at this weight until it feels more controlled.`;
   } else {
-    action = 'backoff'; reason = "Too many very hard sets — drop weight 5–10% next session.";
+    // Significantly above target
+    const drop = increment * 2;
+    action = 'backoff';
+    reason = `Sets well above target RPE — reduce weight by ${drop}lb next session.`;
   }
-  return { action, reason, avgRPE };
+
+  return { action, reason, avgDelta, increment };
+}
+
+// Per-set RPE vs target feedback shown live during workout
+function getRpeFeedback(actualRpe, targetRpe) {
+  if (!actualRpe || !targetRpe) return null;
+  const delta = (RPE_VAL[actualRpe] || 2) - (RPE_VAL[targetRpe] || 2);
+  if (delta <= -2) return { text: "Well below target — consider adding weight", color: "#70c8ff" };
+  if (delta === -1) return { text: "Below target — ready to progress",           color: "#6fcf6f" };
+  if (delta === 0)  return { text: "On target",                                  color: "#8bc34a" };
+  if (delta === 1)  return { text: "Above target — focus on form",               color: "#ff9800" };
+  return              { text: "Well above target — too heavy",                   color: "#f44336" };
 }
 
 // ─── HISTORY ─────────────────────────────────────────────────────────────────
