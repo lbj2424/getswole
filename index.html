@@ -226,6 +226,21 @@
     .set-row:last-child { border-bottom: none; }
     .set-feedback { min-height: 0; transition: all 0.2s; }
     .fatigue-alert { transition: all 0.3s; }
+    .note-input {
+      width: 100%;
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 13px;
+      font-family: inherit;
+      resize: none;
+      min-height: 48px;
+      line-height: 1.4;
+    }
+    .note-input:focus { outline: none; border-color: var(--border); color: var(--text); }
+    .note-input::placeholder { color: #555; }
     .set-num { font-size: 12px; color: var(--muted); font-weight: 700; }
     .set-input {
       background: var(--card2);
@@ -1312,6 +1327,12 @@ function renderWorkout() {
         <div class="set-feedback" id="fb-${ei}-${si}"></div>`;
       }).join('')}
       <div class="fatigue-alert" id="fatigue-${ei}"></div>
+      <div style="padding:10px 16px 14px;">
+        <textarea class="note-input" placeholder="Notes (form cues, how you felt, anything...)"
+          id="note-${ei}"
+          onchange="updateNote(${ei}, this.value)"
+        >${ex.note || ''}</textarea>
+      </div>
     </div>`;
   }).join('');
 }
@@ -1323,6 +1344,10 @@ function shortLabel(l) {
 window.updateSet = function(ei, si, field, val) {
   activeWorkout.exercises[ei].sets[si][field] =
     (field === 'loggedWeight' || field === 'loggedReps') ? (parseFloat(val)||0) : val;
+};
+
+window.updateNote = function(ei, val) {
+  activeWorkout.exercises[ei].note = val.trim();
 };
 
 window.styleRpe = function(ei, si, val, targetRpe) {
@@ -1632,6 +1657,9 @@ window.openHistoryModal = function(id) {
       });
       if (trend && (trend.type === 'stall' || trend.type === 'overreach')) {
         html += `<div style="font-size:11px;color:${trend.color};margin-top:6px;padding:6px 8px;background:#1a1a1a;border-radius:6px;">${trend.msg}</div>`;
+      }
+      if (ex.note) {
+        html += `<div style="font-size:12px;color:var(--muted);margin-top:8px;padding:8px 10px;background:var(--card2);border-radius:6px;border-left:3px solid var(--border);line-height:1.4;">📝 ${ex.note}</div>`;
       }
       html += '</div>';
     });
