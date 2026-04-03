@@ -630,6 +630,7 @@ const EX = {
     muscle: "Quads · Glutes",
     note: "Primary strength lift. Full depth, drive through heels.",
     increment: 10,
+    barWeight: 75, plateNote: "sled ≈75lb, varies by machine",
     sets: [
       { type:"warmup",  reps:10, weight:270, targetRPE:"easy",   label:"Warm-up" },
       { type:"work",    reps:5,  weight:365, targetRPE:"hard",   label:"Set 1" },
@@ -687,6 +688,7 @@ const EX = {
     muscle: "Hamstrings · Glutes",
     note: "Barbell. Push hips back. Feel the stretch. Soft knees.",
     increment: 5,
+    barWeight: 45,
     sets: [
       { type:"work", reps:8, weight:135, targetRPE:"medium", label:"Set 1" },
       { type:"work", reps:8, weight:135, targetRPE:"medium", label:"Set 2" },
@@ -800,6 +802,7 @@ const EX = {
     muscle: "Biceps",
     note: "No swinging. Full control. Squeeze at top.",
     increment: 5,
+    barWeight: 45,
     sets: [
       { type:"warmup", reps:8, weight:50, targetRPE:"easy",   label:"Warm-up" },
       { type:"work",   reps:5, weight:80, targetRPE:"hard",   label:"Top Set" },
@@ -870,6 +873,7 @@ const EX = {
     muscle: "Upper Chest · Shoulders",
     note: "Primary lift. No spotter — stop 1 rep shy of failure.",
     increment: 5,
+    barWeight: 45,
     sets: [
       { type:"warmup", reps:10, weight:50,  targetRPE:"easy",   label:"Warm-up 1" },
       { type:"warmup", reps:6,  weight:70,  targetRPE:"easy",   label:"Warm-up 2" },
@@ -938,6 +942,7 @@ const EX = {
     muscle: "Triceps · Chest",
     note: "Hands shoulder-width. Elbows tucked. Control the bar.",
     increment: 5,
+    barWeight: 45,
     sets: [
       { type:"warmup", reps:8,  weight:65,  targetRPE:"easy",   label:"Warm-up" },
       { type:"work",   reps:5,  weight:95,  targetRPE:"hard",   label:"Top Set" },
@@ -1289,7 +1294,8 @@ function renderWorkout() {
   document.getElementById('finish-btn').style.display = 'block';
   document.getElementById('workout-complete-box').style.display = 'none';
 
-  document.getElementById('exercise-list').innerHTML = activeWorkout.exercises.map((ex, ei) => {
+  const exerciseListEl = document.getElementById('exercise-list');
+  exerciseListEl.innerHTML = activeWorkout.exercises.map((ex, ei) => {
     const workSets = ex.sets.filter(s => s.type === 'work');
     const rangeLabel = workSets.length && workSets[0].repsMin
       ? `${workSets[0].repsMin}–${workSets[0].repsMax} reps target`
@@ -1335,6 +1341,13 @@ function renderWorkout() {
       </div>
     </div>`;
   }).join('');
+
+  // Initialize plate displays for barbell exercises
+  activeWorkout.exercises.forEach((ex, ei) => {
+    if (EX[ex.id].barWeight) {
+      ex.sets.forEach((s, si) => refreshSetFeedback(ei, si));
+    }
+  });
 }
 
 function shortLabel(l) {
@@ -1344,6 +1357,7 @@ function shortLabel(l) {
 window.updateSet = function(ei, si, field, val) {
   activeWorkout.exercises[ei].sets[si][field] =
     (field === 'loggedWeight' || field === 'loggedReps') ? (parseFloat(val)||0) : val;
+  if (field === 'loggedWeight') refreshSetFeedback(ei, si);
 };
 
 window.updateNote = function(ei, val) {
@@ -1353,25 +1367,7 @@ window.updateNote = function(ei, val) {
 window.styleRpe = function(ei, si, val, targetRpe) {
   const s = document.getElementById(`rpe-${ei}-${si}`);
   s.className = `rpe-select${val ? ' rpe-'+val : ''}`;
-
-  // Per-set RPE vs target feedback
-  const fb = document.getElementById(`fb-${ei}-${si}`);
-  if (fb) {
-    const set    = activeWorkout.exercises[ei].sets[si];
-    const info   = getRpeFeedback(val, targetRpe);
-    // Rep range check — only on work sets
-    let repNote  = '';
-    if (set.type === 'work' && set.repsMin && val) {
-      if (set.loggedReps >= set.repsMax) repNote = ' · Hit top of range!';
-      else if (set.loggedReps < set.repsMin) repNote = ' · Below rep target';
-    }
-    fb.style.cssText = info
-      ? `padding:4px 16px 8px;font-size:11px;font-weight:600;color:${info.color}`
-      : '';
-    fb.textContent = info ? info.text + repNote : '';
-  }
-
-  // Intra-workout fatigue detection for this exercise
+  refreshSetFeedback(ei, si);
   updateFatigueAlert(ei);
 };
 
@@ -1573,6 +1569,56 @@ function getTrend(exerciseId) {
       msg: `+${gained}lb over last ${sessions.length} sessions.` };
   }
   return null;
+}
+
+// ─── PLATE CALCULATOR ─────────────────────────────────────────────────────────
+function calcPlates(totalWeight, barWeight) {
+  const plateWeights = [45, 35, 25, 10, 5, 2.5];
+  let perSide = Math.round(((totalWeight - barWeight) / 2) * 100) / 100;
+  if (perSide <= 0) return [];
+  const result = [];
+  for (const p of plateWeights) {
+    while (perSide >= p - 0.01) {
+      result.push(p);
+      perSide = Math.round((perSide - p) * 100) / 100;
+    }
+  }
+  return result;
+}
+
+function refreshSetFeedback(ei, si) {
+  const ex  = activeWorkout.exercises[ei];
+  const set = ex.sets[si];
+  const tmpl = EX[ex.id];
+  const fb  = document.getElementById(`fb-${ei}-${si}`);
+  if (!fb) return;
+
+  const parts = [];
+
+  if (tmpl.barWeight) {
+    const plates  = calcPlates(set.loggedWeight, tmpl.barWeight);
+    const sideStr = plates.length ? plates.join(' · ') : 'bar only';
+    const note    = tmpl.plateNote ? ` <span style="color:#555">(${tmpl.plateNote})</span>` : '';
+    parts.push(`<span style="color:var(--muted)">🏋️ Per side: ${sideStr}${note}</span>`);
+  }
+
+  if (set.rpe) {
+    const info = getRpeFeedback(set.rpe, set.targetRPE);
+    let repNote = '';
+    if (set.type === 'work' && set.repsMin) {
+      if (set.loggedReps >= set.repsMax) repNote = ' · Hit top of range!';
+      else if (set.loggedReps < set.repsMin) repNote = ' · Below rep target';
+    }
+    if (info) parts.push(`<span style="color:${info.color}">${info.text}${repNote}</span>`);
+  }
+
+  if (parts.length) {
+    fb.style.cssText = 'padding:4px 16px 8px;font-size:11px;font-weight:600;line-height:1.8;';
+    fb.innerHTML = parts.join('<br>');
+  } else {
+    fb.style.cssText = '';
+    fb.innerHTML = '';
+  }
 }
 
 function renderStallAlerts() {
