@@ -466,6 +466,7 @@
   </div>
   <button class="btn btn-primary" id="start-btn" onclick="goToSetup()" style="display:none;">Set Up Workout</button>
 
+  <div id="stall-alerts" style="margin-bottom:4px;"></div>
   <div class="divider"></div>
   <div class="card-title" style="margin-bottom:10px;">Recent Workouts</div>
   <div id="recent-list"></div>
@@ -1107,23 +1108,27 @@ window.goToSetup = function() {
 };
 
 function renderRecent() {
+  renderStallAlerts();
   const el = document.getElementById('recent-list');
   const recent = allWorkouts.slice(0, 4);
   if (recent.length === 0) {
     el.innerHTML = '<div class="empty-state"><div class="icon">📋</div><p>No workouts yet. Start your first session!</p></div>';
     return;
   }
-  el.innerHTML = recent.map(w => `
+  el.innerHTML = recent.map(w => {
+    const vol = calcVolume(w);
+    return `
     <div class="history-item" onclick="openHistoryModal('${w.id}')">
       <div class="history-item-header">
         <div>
           <div class="history-date">${formatDate(w.dateISO)}</div>
           <div class="history-day-type">${w.dayName || w.dayType}${w.isDeload ? ' · DELOAD' : ''}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px;">${vol.toLocaleString()} lb volume</div>
         </div>
-        <div class="history-stats">${w.exercises ? w.exercises.length : 0} exercises<br>${totalSets(w)} sets</div>
+        <div class="history-stats">${w.exercises ? w.exercises.length : 0} exercises<br>${totalSets(w)} work sets</div>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 // ─── SETUP SCREEN ─────────────────────────────────────────────────────────────
@@ -1380,6 +1385,79 @@ function getRpeFeedback(actualRpe, targetRpe) {
   return              { text: "Well above target — too heavy",                   color: "#f44336" };
 }
 
+// ─── VOLUME & TREND UTILS ─────────────────────────────────────────────────────
+function calcVolume(workout) {
+  if (!workout.exercises) return 0;
+  return workout.exercises.reduce((total, ex) =>
+    total + ex.sets
+      .filter(s => s.type === 'work')
+      .reduce((a, s) => a + (s.loggedWeight || 0) * (s.loggedReps || 0), 0)
+  , 0);
+}
+
+// Look back through history for up to 3 sessions of a given exercise.
+// Returns trend analysis: stall / overreach / progress / neutral.
+function getTrend(exerciseId) {
+  const sessions = [];
+  for (const w of allWorkouts) {
+    if (!w.exercises) continue;
+    const ex = w.exercises.find(e => e.id === exerciseId);
+    if (!ex) continue;
+    const workSets = ex.sets.filter(s => s.type === 'work');
+    if (!workSets.length) continue;
+    const maxWeight = Math.max(...workSets.map(s => s.loggedWeight || 0));
+    const ratedSets = workSets.filter(s => s.rpe && s.targetRPE);
+    const avgDelta  = ratedSets.length
+      ? ratedSets.reduce((a, s) => a + (RPE_VAL[s.rpe]||2) - (RPE_VAL[s.targetRPE]||2), 0) / ratedSets.length
+      : 0;
+    sessions.push({ date: w.dateISO, maxWeight, avgDelta });
+    if (sessions.length >= 3) break;
+  }
+  if (sessions.length < 2) return null;
+
+  const weights      = sessions.map(s => s.maxWeight);
+  const allSame      = weights.every(w => w === weights[0]);
+  const avgDeltaAll  = sessions.reduce((a, s) => a + s.avgDelta, 0) / sessions.length;
+  const isProgressing = weights[0] > weights[weights.length - 1]; // most recent first
+
+  if (sessions.length >= 3 && allSame && avgDeltaAll >= 0) {
+    return { type: 'stall',     label: '⚠️ Stall', color: '#ff9800',
+      msg: `Same weight (${weights[0]}lb) for ${sessions.length} sessions with no improvement in effort — try a technique tweak or slight weight drop.` };
+  }
+  if (avgDeltaAll > 1) {
+    return { type: 'overreach', label: '🔴 Overreaching', color: '#f44336',
+      msg: `Consistently harder than target across recent sessions — weight may be too heavy.` };
+  }
+  if (isProgressing) {
+    const gained = weights[0] - weights[weights.length - 1];
+    return { type: 'progress',  label: '✅ Progressing', color: '#6fcf6f',
+      msg: `+${gained}lb over last ${sessions.length} sessions.` };
+  }
+  return null;
+}
+
+function renderStallAlerts() {
+  // Collect all exercise IDs that appear in recent history
+  const seen = new Set();
+  allWorkouts.slice(0, 6).forEach(w => w.exercises && w.exercises.forEach(e => seen.add(e.id)));
+  const alerts = [];
+  seen.forEach(id => {
+    const t = getTrend(id);
+    if (t && (t.type === 'stall' || t.type === 'overreach')) {
+      alerts.push({ name: EX[id]?.name || id, ...t });
+    }
+  });
+  const el = document.getElementById('stall-alerts');
+  if (!el) return;
+  if (!alerts.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div class="card-title" style="margin-bottom:8px;">Coach Alerts</div>
+    ${alerts.map(a => `
+      <div class="rec-banner ${a.type === 'stall' ? 'rec-stay' : 'rec-backoff'}" style="margin-bottom:8px;">
+        <strong>${a.name}:</strong> ${a.msg}
+      </div>`).join('')}`;
+}
+
 // ─── HISTORY ─────────────────────────────────────────────────────────────────
 function renderHistory() {
   const el = document.getElementById('history-list');
@@ -1387,45 +1465,64 @@ function renderHistory() {
     el.innerHTML = '<div class="empty-state"><div class="icon">📋</div><p>No workouts logged yet.</p></div>';
     return;
   }
-  el.innerHTML = allWorkouts.map(w => `
+  el.innerHTML = allWorkouts.map(w => {
+    const vol = calcVolume(w);
+    return `
     <div class="history-item" onclick="openHistoryModal('${w.id}')">
       <div class="history-item-header">
         <div>
           <div class="history-date">${formatDate(w.dateISO)}</div>
           <div class="history-day-type">${w.dayName || w.dayType}${w.isDeload ? ' · DELOAD' : ''}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:3px;">${vol.toLocaleString()} lb total volume</div>
         </div>
-        <div class="history-stats">${w.exercises ? w.exercises.length : 0} exercises<br>${totalSets(w)} sets</div>
+        <div class="history-stats">${w.exercises ? w.exercises.length : 0} exercises<br>${totalSets(w)} work sets</div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 window.openHistoryModal = function(id) {
   const w = allWorkouts.find(x => x.id === id);
   if (!w) return;
   document.getElementById('modal-title').textContent = w.dayName || w.dayType;
-  document.getElementById('modal-sub').textContent   =
-    formatDate(w.dateISO) + (w.isDeload ? ' · Deload Week' : ` · Week ${w.weekNumber}`);
+  const vol = calcVolume(w);
+  document.getElementById('modal-sub').textContent =
+    formatDate(w.dateISO) + (w.isDeload ? ' · Deload Week' : ` · Week ${w.weekNumber}`) +
+    ` · ${vol.toLocaleString()}lb volume`;
 
   let html = '';
   if (w.exercises) {
     w.exercises.forEach(ex => {
+      const trend = getTrend(ex.id);
       html += `<div style="margin-bottom:14px;">
-        <div style="font-weight:700;font-size:14px;margin-bottom:6px;">${ex.name}</div>`;
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <div style="font-weight:700;font-size:14px;">${ex.name}</div>
+          ${trend ? `<span style="font-size:10px;font-weight:700;color:${trend.color}">${trend.label}</span>` : ''}
+        </div>`;
       ex.sets.forEach(s => {
         const col = s.rpe
           ? `var(--${s.rpe==='vhard'?'vhard':s.rpe==='hard'?'hard':s.rpe==='medium'?'medium':'easy'})`
           : 'var(--muted)';
-        html += `<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;border-bottom:1px solid var(--border);">
-          <span style="color:var(--muted)">${s.label}</span>
-          <span>${s.loggedWeight}lb × ${s.loggedReps}</span>
-          <span style="color:${col};font-weight:600">${s.rpe ? RPE_LABEL[s.rpe] : '—'}</span>
+        const delta = (s.rpe && s.targetRPE)
+          ? (RPE_VAL[s.rpe]||2) - (RPE_VAL[s.targetRPE]||2) : null;
+        const deltaStr = delta !== null
+          ? (delta > 0 ? `<span style="color:#ff9800;font-size:10px;">+${delta}</span>`
+            : delta < 0 ? `<span style="color:#6fcf6f;font-size:10px;">${delta}</span>`
+            : `<span style="color:#8bc34a;font-size:10px;">✓</span>`) : '';
+        html += `<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:4px 0;border-bottom:1px solid var(--border);">
+          <span style="color:var(--muted);flex:1">${s.label}</span>
+          <span style="flex:1;text-align:center">${s.loggedWeight}lb × ${s.loggedReps}</span>
+          <span style="color:${col};font-weight:600;flex:1;text-align:right">${s.rpe ? RPE_LABEL[s.rpe] : '—'} ${deltaStr}</span>
         </div>`;
       });
+      if (trend && (trend.type === 'stall' || trend.type === 'overreach')) {
+        html += `<div style="font-size:11px;color:${trend.color};margin-top:6px;padding:6px 8px;background:#1a1a1a;border-radius:6px;">${trend.msg}</div>`;
+      }
       html += '</div>';
     });
   }
   if (w.recommendations) {
-    html += '<div style="margin-top:12px;"><div style="font-size:11px;text-transform:uppercase;color:var(--muted);letter-spacing:1px;margin-bottom:8px;">Coach Notes</div>';
+    html += '<div style="margin-top:12px;"><div style="font-size:11px;text-transform:uppercase;color:var(--muted);letter-spacing:1px;margin-bottom:8px;">Next Session</div>';
     w.recommendations.forEach(r => {
       if (!r.rec) return;
       const cls = r.rec.action==='increase' ? 'rec-increase' : r.rec.action==='backoff' ? 'rec-backoff' : 'rec-stay';
