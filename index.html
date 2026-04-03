@@ -225,6 +225,7 @@
     }
     .set-row:last-child { border-bottom: none; }
     .set-feedback { min-height: 0; transition: all 0.2s; }
+    .fatigue-alert { transition: all 0.3s; }
     .set-num { font-size: 12px; color: var(--muted); font-weight: 700; }
     .set-input {
       background: var(--card2);
@@ -965,6 +966,28 @@ const EX = {
   },
 };
 
+// ─── REP RANGE POST-PROCESSOR ────────────────────────────────────────────────
+// Adds repsMin / repsMax to every work/backoff set automatically.
+// Warmup sets stay fixed. Ranges are based on the template rep count.
+Object.values(EX).forEach(ex => {
+  ex.sets.forEach(s => {
+    if (s.type === 'warmup') return; // warmups are fixed — no range
+    if (s.reps <= 5) {
+      s.repsMin = Math.max(s.reps - 1, 1);
+      s.repsMax = s.reps + 1;           // e.g. 5 → 4–6
+    } else if (s.reps <= 8) {
+      s.repsMin = s.reps - 2;
+      s.repsMax = s.reps + 2;           // e.g. 8 → 6–10
+    } else if (s.reps <= 12) {
+      s.repsMin = s.reps - 2;
+      s.repsMax = s.reps + 3;           // e.g. 10 → 8–13, 12 → 10–15
+    } else {
+      s.repsMin = s.reps - 2;
+      s.repsMax = s.reps + 4;           // e.g. 14 → 12–18
+    }
+  });
+});
+
 // ─── DAY SLOTS ────────────────────────────────────────────────────────────────
 // Each slot is either fixed (always that exercise) or a pool the user can swap.
 
@@ -1234,7 +1257,7 @@ window.beginWorkout = function() {
           const historyW = getLastWeight(exId, si);
           let baseW = historyW !== null ? historyW : s.weight;
           if (isDeloadWeek()) baseW = applyDeload(baseW);
-          return { ...s, loggedWeight: baseW, loggedReps: s.reps, rpe: null };
+          return { ...s, loggedWeight: baseW, loggedReps: s.repsMin || s.reps, rpe: null };
         })
       };
     })
@@ -1251,21 +1274,31 @@ function renderWorkout() {
   document.getElementById('finish-btn').style.display = 'block';
   document.getElementById('workout-complete-box').style.display = 'none';
 
-  document.getElementById('exercise-list').innerHTML = activeWorkout.exercises.map((ex, ei) => `
-    <div class="exercise-block">
+  document.getElementById('exercise-list').innerHTML = activeWorkout.exercises.map((ex, ei) => {
+    const workSets = ex.sets.filter(s => s.type === 'work');
+    const rangeLabel = workSets.length && workSets[0].repsMin
+      ? `${workSets[0].repsMin}–${workSets[0].repsMax} reps target`
+      : '';
+    return `
+    <div class="exercise-block" id="exblock-${ei}">
       <div class="exercise-header">
-        <div class="exercise-name">${ex.name}</div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+          <div class="exercise-name">${ex.name}</div>
+          ${rangeLabel ? `<span style="font-size:11px;color:var(--accent);font-weight:700;white-space:nowrap;margin-left:8px;">${rangeLabel}</span>` : ''}
+        </div>
         <div class="exercise-meta">${EX[ex.id].note}</div>
         ${isDeloadWeek() ? '<div class="exercise-target">⚡ Deload — weights reduced 20%</div>' : ''}
       </div>
-      ${ex.sets.map((s, si) => `
+      ${ex.sets.map((s, si) => {
+        const rangePlaceholder = s.repsMin ? `${s.repsMin}–${s.repsMax}` : 'reps';
+        return `
         <div class="set-row">
           <div class="set-num">${shortLabel(s.label)}</div>
           <input class="set-input" type="number" inputmode="decimal"
             value="${s.loggedWeight}" placeholder="lbs"
             onchange="updateSet(${ei},${si},'loggedWeight',this.value)" />
           <input class="set-input" type="number" inputmode="numeric"
-            value="${s.loggedReps}" placeholder="reps"
+            value="${s.loggedReps}" placeholder="${rangePlaceholder}"
             onchange="updateSet(${ei},${si},'loggedReps',this.value)" />
           <select class="rpe-select ${s.rpe ? 'rpe-'+s.rpe : ''}" id="rpe-${ei}-${si}"
             onchange="updateSet(${ei},${si},'rpe',this.value);styleRpe(${ei},${si},this.value,'${s.targetRPE}')">
@@ -1276,8 +1309,11 @@ function renderWorkout() {
             <option value="vhard"  ${s.rpe==='vhard' ?'selected':''}>V.Hard</option>
           </select>
         </div>
-        <div class="set-feedback" id="fb-${ei}-${si}"></div>`).join('')}
-    </div>`).join('');
+        <div class="set-feedback" id="fb-${ei}-${si}"></div>`;
+      }).join('')}
+      <div class="fatigue-alert" id="fatigue-${ei}"></div>
+    </div>`;
+  }).join('');
 }
 
 function shortLabel(l) {
@@ -1292,13 +1328,26 @@ window.updateSet = function(ei, si, field, val) {
 window.styleRpe = function(ei, si, val, targetRpe) {
   const s = document.getElementById(`rpe-${ei}-${si}`);
   s.className = `rpe-select${val ? ' rpe-'+val : ''}`;
+
+  // Per-set RPE vs target feedback
   const fb = document.getElementById(`fb-${ei}-${si}`);
-  if (!fb) return;
-  const info = getRpeFeedback(val, targetRpe);
-  fb.style.cssText = info
-    ? `padding:4px 16px 8px;font-size:11px;font-weight:600;color:${info.color}`
-    : '';
-  fb.textContent = info ? info.text : '';
+  if (fb) {
+    const set    = activeWorkout.exercises[ei].sets[si];
+    const info   = getRpeFeedback(val, targetRpe);
+    // Rep range check — only on work sets
+    let repNote  = '';
+    if (set.type === 'work' && set.repsMin && val) {
+      if (set.loggedReps >= set.repsMax) repNote = ' · Hit top of range!';
+      else if (set.loggedReps < set.repsMin) repNote = ' · Below rep target';
+    }
+    fb.style.cssText = info
+      ? `padding:4px 16px 8px;font-size:11px;font-weight:600;color:${info.color}`
+      : '';
+    fb.textContent = info ? info.text + repNote : '';
+  }
+
+  // Intra-workout fatigue detection for this exercise
+  updateFatigueAlert(ei);
 };
 
 window.cancelWorkout = function() {
@@ -1340,36 +1389,53 @@ function getRecommendation(exerciseId, loggedSets) {
   const workSets = loggedSets.filter(s => s.type === 'work' && s.rpe && s.targetRPE);
   if (!workSets.length) return null;
 
-  const increment = EX[exerciseId]?.increment || 5;
-  const deltas = workSets.map(s => (RPE_VAL[s.rpe] || 2) - (RPE_VAL[s.targetRPE] || 2));
-  const avgDelta = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+  const increment   = EX[exerciseId]?.increment || 5;
+  const deltas      = workSets.map(s => (RPE_VAL[s.rpe] || 2) - (RPE_VAL[s.targetRPE] || 2));
+  const avgDelta    = deltas.reduce((a, b) => a + b, 0) / deltas.length;
   const aboveTarget = deltas.filter(d => d > 0).length;
   const totalWork   = deltas.length;
 
+  // Rep range signals
+  const setsWithRange  = workSets.filter(s => s.repsMin && s.repsMax);
+  const setsAtTop      = setsWithRange.filter(s => s.loggedReps >= s.repsMax).length;
+  const setsBelowRange = setsWithRange.filter(s => s.loggedReps < s.repsMin).length;
+  const allAtTop       = setsWithRange.length > 0 && setsAtTop === setsWithRange.length;
+  const mostBelowRange = setsWithRange.length > 0 && setsBelowRange > setsWithRange.length / 2;
+
+  // Intra-workout fatigue signal
+  const fatigue = checkIntraFatigue(loggedSets);
+
   let action, reason;
 
-  if (avgDelta <= -1) {
-    // All/most sets easier than target — clear green light
+  if (mostBelowRange) {
+    // Couldn't hit even the bottom of the rep range — weight is too heavy
+    action = 'backoff';
+    reason = `Couldn't reach the minimum rep target — reduce weight by ${increment}lb next session.`;
+  } else if (allAtTop && avgDelta <= 0) {
+    // Hit top of range at controlled effort — clear progression signal
+    action = 'increase';
+    reason = `Hit top of rep range at controlled effort — add ${increment}lb next session.`;
+  } else if (fatigue && fatigue.level === 'high' && avgDelta > 0) {
+    // Sharp fatigue + above target RPE — back off
+    const drop = increment * 2;
+    action = 'backoff';
+    reason = `Sharp fatigue across sets and above target effort — reduce weight by ${drop}lb next session.`;
+  } else if (avgDelta <= -1) {
     action = 'increase';
     reason = `Sets consistently below target effort — add ${increment}lb next session.`;
   } else if (avgDelta < 0) {
-    // Trending easier
     action = 'increase';
     reason = `Trending easier than target — add ${increment}lb next session.`;
   } else if (avgDelta === 0) {
-    // Perfectly on target — still progress
     action = 'increase';
     reason = `Right on target — add ${increment}lb next session.`;
   } else if (avgDelta <= 0.5 || aboveTarget <= totalWork / 2) {
-    // Slightly above target on fewer than half the sets
     action = 'stay';
     reason = `A couple sets above target — repeat this weight and focus on cleaner reps.`;
   } else if (avgDelta <= 1) {
-    // Most sets harder than planned
     action = 'stay';
     reason = `Most sets harder than target — stay at this weight until it feels more controlled.`;
   } else {
-    // Significantly above target
     const drop = increment * 2;
     action = 'backoff';
     reason = `Sets well above target RPE — reduce weight by ${drop}lb next session.`;
@@ -1387,6 +1453,50 @@ function getRpeFeedback(actualRpe, targetRpe) {
   if (delta === 0)  return { text: "On target",                                  color: "#8bc34a" };
   if (delta === 1)  return { text: "Above target — focus on form",               color: "#ff9800" };
   return              { text: "Well above target — too heavy",                   color: "#f44336" };
+}
+
+// ─── INTRA-WORKOUT FATIGUE DETECTION ─────────────────────────────────────────
+// Checks if RPE is climbing sharply across sets of the same exercise.
+function checkIntraFatigue(exerciseSets) {
+  const workSets = exerciseSets.filter(s => s.type === 'work' && s.rpe);
+  if (workSets.length < 2) return null;
+
+  const vals  = workSets.map(s => RPE_VAL[s.rpe] || 0);
+  const first = vals[0];
+  const last  = vals[vals.length - 1];
+  const rise  = last - first;
+
+  // Also check if any set was well above its target
+  const setsAboveTarget = workSets.filter(s =>
+    s.targetRPE && (RPE_VAL[s.rpe] - RPE_VAL[s.targetRPE]) >= 2
+  ).length;
+
+  if (rise >= 2) {
+    return { level: 'high', color: '#f44336',
+      msg: `RPE jumped ${rise} levels across sets — rest longer (2–3 min) or drop weight on remaining sets.` };
+  }
+  if (rise === 1 && workSets.length >= 3) {
+    return { level: 'medium', color: '#ff9800',
+      msg: `Fatigue building — make sure you\'re resting at least 90 seconds between sets.` };
+  }
+  if (setsAboveTarget >= 2) {
+    return { level: 'medium', color: '#ff9800',
+      msg: `Multiple sets above target RPE — weight may be too heavy for today.` };
+  }
+  return null;
+}
+
+function updateFatigueAlert(ei) {
+  const el = document.getElementById(`fatigue-${ei}`);
+  if (!el || !activeWorkout) return;
+  const fatigue = checkIntraFatigue(activeWorkout.exercises[ei].sets);
+  if (fatigue) {
+    el.style.cssText = `margin:0 16px 12px;padding:10px 12px;border-radius:8px;font-size:12px;font-weight:600;color:${fatigue.color};background:${fatigue.color}18;border:1px solid ${fatigue.color}44`;
+    el.textContent = fatigue.msg;
+  } else {
+    el.style.cssText = '';
+    el.textContent = '';
+  }
 }
 
 // ─── VOLUME & TREND UTILS ─────────────────────────────────────────────────────
