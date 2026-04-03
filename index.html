@@ -544,7 +544,10 @@
     <div class="modal-sub" id="modal-sub"></div>
     <div id="modal-body"></div>
     <div class="divider"></div>
-    <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-danger btn-sm" style="flex:1" id="modal-delete-btn" onclick="deleteWorkout()">Delete</button>
+      <button class="btn btn-secondary btn-sm" style="flex:1" onclick="closeModal()">Close</button>
+    </div>
   </div>
 </div>
 
@@ -584,7 +587,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
-import { getFirestore, collection, addDoc, getDocs, orderBy, query, serverTimestamp }
+import { getFirestore, collection, addDoc, getDocs, orderBy, query, serverTimestamp, deleteDoc, doc, updateDoc }
   from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -1006,6 +1009,7 @@ let currentDay    = null;
 let selectedSlots = {};   // slotIndex → exerciseId (for setup screen choices)
 let activeWorkout = null;
 let allWorkouts   = [];
+let openModalId   = null; // ID of workout currently open in modal
 let currentWeek   = 1;
 let selectedLift  = null;
 let swapSlotIndex = null; // which slot is being swapped
@@ -1484,6 +1488,7 @@ function renderHistory() {
 window.openHistoryModal = function(id) {
   const w = allWorkouts.find(x => x.id === id);
   if (!w) return;
+  openModalId = id;
   document.getElementById('modal-title').textContent = w.dayName || w.dayType;
   const vol = calcVolume(w);
   document.getElementById('modal-sub').textContent =
@@ -1536,6 +1541,24 @@ window.openHistoryModal = function(id) {
 
 window.closeModal = function() {
   document.getElementById('history-modal').classList.remove('open');
+  openModalId = null;
+};
+
+window.deleteWorkout = async function() {
+  if (!openModalId) return;
+  if (!confirm("Delete this workout? This can't be undone.")) return;
+  try {
+    await deleteDoc(doc(db, "workouts", openModalId));
+    showToast("Workout deleted");
+    closeModal();
+    await loadWorkouts();
+    renderRecent();
+    renderStallAlerts();
+    updateHomeWeekInfo();
+  } catch(e) {
+    showToast("Delete failed");
+    console.error(e);
+  }
 };
 
 // ─── PROGRESS ─────────────────────────────────────────────────────────────────
