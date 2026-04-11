@@ -402,9 +402,80 @@
     .swap-option-last { font-size: 11px; color: var(--accent); margin-top: 2px; }
     .swap-check { color: var(--accent); font-size: 20px; }
 
+    .readiness-option {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 16px 0;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .readiness-option:last-child { border-bottom: none; }
+    .readiness-option:active { opacity: 0.6; }
+    .readiness-icon { font-size: 28px; min-width: 36px; text-align: center; }
+    .readiness-label { font-size: 15px; font-weight: 700; }
+    .readiness-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
     .divider { height: 1px; background: var(--border); margin: 16px 0; }
 
     /* TOAST */
+    /* TIMER BAR */
+    #timer-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 150;
+      background: #111;
+      border-bottom: 2px solid var(--border);
+      padding: 10px 16px;
+      display: none;
+      align-items: center;
+      gap: 10px;
+    }
+    #timer-bar.visible { display: flex; }
+    .timer-phase {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--muted);
+      font-weight: 700;
+      min-width: 28px;
+    }
+    .timer-count {
+      font-size: 26px;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      flex: 1;
+      letter-spacing: -0.5px;
+    }
+    .timer-green  { color: #6fcf6f; }
+    .timer-orange { color: #ff9800; }
+    .timer-red    { color: #f44336; }
+    .timer-accent { color: var(--accent); }
+    .timer-add-btn {
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 7px 11px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .timer-start-btn {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      padding: 9px 16px;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .timer-start-btn:active { opacity: 0.85; }
+
     .toast {
       position: fixed;
       bottom: 90px;
@@ -577,6 +648,43 @@
       <button class="btn btn-secondary" onclick="closeSwap()">Cancel</button>
     </div>
   </div>
+</div>
+
+<!-- ── READINESS SHEET ───────────────────────────────────────────────────── -->
+<div class="sheet-overlay" id="readiness-sheet">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <h3>How are you feeling today?</h3>
+    <div class="sheet-sub">Helps calibrate today's recommendations</div>
+    <div class="readiness-option" onclick="setReadiness('tired')">
+      <div class="readiness-icon">😴</div>
+      <div>
+        <div class="readiness-label">Tired / Sore</div>
+        <div class="readiness-meta">Poor sleep, still sore, or low energy</div>
+      </div>
+    </div>
+    <div class="readiness-option" onclick="setReadiness('normal')">
+      <div class="readiness-icon">😐</div>
+      <div>
+        <div class="readiness-label">Normal</div>
+        <div class="readiness-meta">Average day, nothing special</div>
+      </div>
+    </div>
+    <div class="readiness-option" onclick="setReadiness('fresh')">
+      <div class="readiness-icon">⚡</div>
+      <div>
+        <div class="readiness-label">Feeling great</div>
+        <div class="readiness-meta">Well rested, energized, ready to push</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── REST TIMER BAR ────────────────────────────────────────────────────── -->
+<div id="timer-bar">
+  <span id="timer-phase" class="timer-phase">REST</span>
+  <span id="timer-count" class="timer-count timer-green">1:30</span>
+  <button class="timer-add-btn" id="timer-add-btn" onclick="addRestTime(30)">+30s</button>
+  <button class="timer-start-btn" id="timer-start-btn" onclick="tapStartSet()">▶ Start Set</button>
 </div>
 
 <!-- ── BOTTOM NAV ─────────────────────────────────────────────────────────── -->
@@ -1055,10 +1163,20 @@ let allWorkouts   = [];
 let openModalId   = null; // ID of workout currently open in modal
 let currentWeek   = 1;
 let selectedLift  = null;
-let swapSlotIndex = null; // which slot is being swapped
+let swapSlotIndex  = null; // which slot is being swapped (setup screen)
+let swapWorkoutEi  = null; // exercise index being swapped mid-workout
 
 const RPE_VAL   = { easy:1, medium:2, hard:3, vhard:4 };
 const RPE_LABEL = { easy:"Easy", medium:"Medium", hard:"Hard", vhard:"Very Hard" };
+
+// Target rest (seconds) by how hard the previous set felt. User's sweet spot: 90–120s.
+const TARGET_REST_BY_RPE = { easy:90, medium:90, hard:105, vhard:120 };
+
+// ─── REST TIMER STATE ─────────────────────────────────────────────────────────
+// timerState phases:
+//   'rest' — counting down/up rest time after a set
+//   'set'  — counting up set duration after Start Set is tapped
+let timerState = null;
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 async function init() {
@@ -1118,6 +1236,15 @@ function updateHomeWeekInfo() {
     deloadNote.style.display = 'none';
     info.textContent  = ['Building base.','Progressing weights.','Peak week — push top sets.'][currentWeek-1] || '';
   }
+}
+
+// ─── WARM-UP AUTO-CALCULATION ─────────────────────────────────────────────────
+// Scales warm-up weights as a percentage of the top work set weight.
+// 1 warm-up → 60%, 2 warm-ups → 50% / 70%. Rounded to nearest 5lb.
+function calcWarmupWeight(topWorkWeight, warmupIndex, totalWarmups) {
+  const pcts = totalWarmups === 1 ? [0.6] : [0.5, 0.7];
+  const pct  = pcts[Math.min(warmupIndex, pcts.length - 1)];
+  return Math.max(Math.round(topWorkWeight * pct / 5) * 5, 5);
 }
 
 // ─── HISTORY AUTO-FILL ────────────────────────────────────────────────────────
@@ -1261,36 +1388,128 @@ window.closeSwap = function(e) {
   }
 };
 
+// ─── MID-WORKOUT SWAP ─────────────────────────────────────────────────────────
+window.openWorkoutSwap = function(ei) {
+  swapWorkoutEi = ei;
+  const ex   = activeWorkout.exercises[ei];
+  const slot = DAY_SLOTS[activeWorkout.dayType].slots[ex.slotIndex];
+
+  document.getElementById('swap-sheet-sub').textContent =
+    `Swapping ${ex.name} — pick a replacement`;
+
+  const hasLogged = ex.sets.some(s => s.rpe);
+  const optEl = document.getElementById('swap-options-list');
+  optEl.innerHTML = slot.options.map(exId => {
+    const tmpl   = EX[exId];
+    const lastW  = getLastWeightForExercise(exId);
+    const isCurrent = exId === ex.id;
+    const warnStr = (!isCurrent && hasLogged)
+      ? `<div style="font-size:11px;color:var(--vhard);margin-top:3px;">⚠️ Logged sets will be cleared</div>`
+      : '';
+    return `
+      <div class="swap-option" onclick="confirmWorkoutSwap('${exId}')">
+        <div>
+          <div class="swap-option-name">${tmpl.name}</div>
+          <div class="swap-option-meta">${tmpl.note}</div>
+          ${lastW !== null
+            ? `<div class="swap-option-last">Last logged: ${lastW}lb</div>`
+            : `<div class="swap-option-last" style="color:var(--muted)">No history</div>`}
+          ${warnStr}
+        </div>
+        ${isCurrent ? `<span class="swap-check">✓</span>` : ''}
+      </div>`;
+  }).join('');
+
+  document.getElementById('swap-sheet').classList.add('open');
+};
+
+window.confirmWorkoutSwap = function(newExId) {
+  const ei = swapWorkoutEi;
+  const ex = activeWorkout.exercises[ei];
+  if (newExId === ex.id) { closeSwap(); return; }
+
+  const hasLogged = ex.sets.some(s => s.rpe);
+  if (hasLogged && !confirm(`Swap to ${EX[newExId].name}? Logged sets for ${ex.name} will be cleared.`)) return;
+
+  const template = EX[newExId];
+  const sets = template.sets.map((s, si) => {
+    const historyW = getLastWeight(newExId, si);
+    let baseW = historyW !== null ? historyW : s.weight;
+    if (isDeloadWeek()) baseW = applyDeload(baseW);
+    return { ...s, loggedWeight: baseW, loggedReps: s.repsMin || s.reps, rpe: null };
+  });
+
+  // Auto-calculate warm-up weights for the new exercise
+  const topWorkW = Math.max(0, ...sets.filter(s => s.type === 'work').map(s => s.loggedWeight));
+  if (topWorkW > 0) {
+    const warmupSets = sets.filter(s => s.type === 'warmup');
+    let wi = 0;
+    sets.forEach(s => {
+      if (s.type === 'warmup') { s.loggedWeight = calcWarmupWeight(topWorkW, wi, warmupSets.length); wi++; }
+    });
+  }
+
+  activeWorkout.exercises[ei] = {
+    id: newExId, name: template.name,
+    slotIndex: ex.slotIndex, isFixed: ex.isFixed,
+    sets
+  };
+
+  closeSwap();
+  renderWorkout();
+  showToast(`Swapped to ${template.name}`);
+};
+
 // ─── BEGIN WORKOUT ────────────────────────────────────────────────────────────
 window.beginWorkout = function() {
   const day = DAY_SLOTS[currentDay];
+
   activeWorkout = {
     dayType:  currentDay,
     dayName:  day.name,
     dateISO:  new Date().toISOString().split('T')[0],
-    exercises: Object.values(selectedSlots).map(exId => {
+    readiness: null,
+    exercises: day.slots.map((slot, i) => {
+      const exId    = selectedSlots[i];
       const template = EX[exId];
-      return {
-        id:   exId,
-        name: template.name,
-        sets: template.sets.map((s, si) => {
-          const historyW = getLastWeight(exId, si);
-          let baseW = historyW !== null ? historyW : s.weight;
-          if (isDeloadWeek()) baseW = applyDeload(baseW);
-          return { ...s, loggedWeight: baseW, loggedReps: s.repsMin || s.reps, rpe: null };
-        })
-      };
+
+      // Pass 1: fill weights from history / template defaults
+      const sets = template.sets.map((s, si) => {
+        const historyW = getLastWeight(exId, si);
+        let baseW = historyW !== null ? historyW : s.weight;
+        if (isDeloadWeek()) baseW = applyDeload(baseW);
+        return { ...s, loggedWeight: baseW, loggedReps: s.repsMin || s.reps, rpe: null };
+      });
+
+      // Pass 2: auto-scale warm-up weights from top work set
+      const topWorkW = Math.max(0, ...sets.filter(s => s.type === 'work').map(s => s.loggedWeight));
+      if (topWorkW > 0) {
+        const warmupSets = sets.filter(s => s.type === 'warmup');
+        let wi = 0;
+        sets.forEach(s => {
+          if (s.type === 'warmup') {
+            s.loggedWeight = calcWarmupWeight(topWorkW, wi, warmupSets.length);
+            wi++;
+          }
+        });
+      }
+
+      return { id: exId, name: template.name, slotIndex: i, isFixed: !!slot.fixed, sets };
     })
   };
-  renderWorkout();
-  showScreen('workout');
+
+  // Show readiness check before starting
+  document.getElementById('readiness-sheet').classList.add('open');
 };
 
 // ─── WORKOUT SCREEN ───────────────────────────────────────────────────────────
 function renderWorkout() {
   document.getElementById('workout-title').textContent = DAY_SLOTS[activeWorkout.dayType].name;
+  const readinessLabel = { tired: ' · 😴 Tired day', normal: '', fresh: ' · ⚡ Feeling great' };
   document.getElementById('workout-subtitle').textContent =
-    activeWorkout.dateISO + (isDeloadWeek() ? ' · DELOAD WEEK' : '');
+    activeWorkout.dateISO +
+    (isDeloadWeek() ? ' · DELOAD WEEK' : '') +
+    (readinessLabel[activeWorkout.readiness] || '');
   document.getElementById('finish-btn').style.display = 'block';
   document.getElementById('workout-complete-box').style.display = 'none';
 
@@ -1300,14 +1519,23 @@ function renderWorkout() {
     const rangeLabel = workSets.length && workSets[0].repsMin
       ? `${workSets[0].repsMin}–${workSets[0].repsMax} reps target`
       : '';
+    const trend = getTrend(ex.id);
+    const trendBadge = trend
+      ? `<span style="font-size:10px;font-weight:700;color:${trend.color};margin-left:6px;">${trend.label}</span>`
+      : '';
     return `
     <div class="exercise-block" id="exblock-${ei}">
       <div class="exercise-header">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-          <div class="exercise-name">${ex.name}</div>
-          ${rangeLabel ? `<span style="font-size:11px;color:var(--accent);font-weight:700;white-space:nowrap;margin-left:8px;">${rangeLabel}</span>` : ''}
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;">
+              <div class="exercise-name">${ex.name}</div>${trendBadge}
+            </div>
+            ${rangeLabel ? `<div style="font-size:11px;color:var(--accent);font-weight:700;margin-top:2px;">${rangeLabel}</div>` : ''}
+          </div>
+          ${!ex.isFixed ? `<button class="swap-btn" style="flex-shrink:0;" onclick="openWorkoutSwap(${ei})">Swap</button>` : ''}
         </div>
-        <div class="exercise-meta">${EX[ex.id].note}</div>
+        <div class="exercise-meta" style="margin-top:6px;">${EX[ex.id].note}</div>
         ${isDeloadWeek() ? '<div class="exercise-target">⚡ Deload — weights reduced 20%</div>' : ''}
       </div>
       ${ex.sets.map((s, si) => {
@@ -1357,7 +1585,7 @@ function shortLabel(l) {
 window.updateSet = function(ei, si, field, val) {
   activeWorkout.exercises[ei].sets[si][field] =
     (field === 'loggedWeight' || field === 'loggedReps') ? (parseFloat(val)||0) : val;
-  if (field === 'loggedWeight') refreshSetFeedback(ei, si);
+  if (field === 'loggedWeight') { refreshSetFeedback(ei, si); updateFatigueAlert(ei); }
 };
 
 window.updateNote = function(ei, val) {
@@ -1369,10 +1597,19 @@ window.styleRpe = function(ei, si, val, targetRpe) {
   s.className = `rpe-select${val ? ' rpe-'+val : ''}`;
   refreshSetFeedback(ei, si);
   updateFatigueAlert(ei);
+  if (val) startRestTimer(ei, si, val);
+};
+
+window.setReadiness = function(level) {
+  activeWorkout.readiness = level;
+  document.getElementById('readiness-sheet').classList.remove('open');
+  renderWorkout();
+  showScreen('workout');
 };
 
 window.cancelWorkout = function() {
   if (confirm("Cancel this workout? Progress will be lost.")) {
+    hideTimerBar();
     activeWorkout = null;
     goHome();
   }
@@ -1399,8 +1636,108 @@ window.finishWorkout = async function() {
 
   document.getElementById('finish-btn').style.display = 'none';
   document.getElementById('workout-complete-box').style.display = 'block';
+  hideTimerBar();
   activeWorkout = null;
 };
+
+// ─── REST TIMER ───────────────────────────────────────────────────────────────
+
+function formatTime(s) {
+  const abs = Math.abs(Math.round(s));
+  return Math.floor(abs / 60) + ':' + String(abs % 60).padStart(2, '0');
+}
+
+// Called when RPE is logged for any set.
+function startRestTimer(ei, si, rpe) {
+  // If we were mid-set, record that set's duration before switching to rest
+  if (timerState?.phase === 'set') {
+    const dur = Math.round((Date.now() - timerState.setStartTime) / 1000);
+    if (activeWorkout?.exercises[ei]?.sets[si]) {
+      activeWorkout.exercises[ei].sets[si].setDuration = dur;
+    }
+  }
+  clearInterval(timerState?.intervalId);
+
+  timerState = {
+    phase:         'rest',
+    restStartTime: Date.now(),
+    targetSeconds: TARGET_REST_BY_RPE[rpe] || 90,
+    fromEi:        ei,
+    fromSi:        si,
+    intervalId:    setInterval(tickTimer, 1000)
+  };
+  showTimerBar();
+  updateTimerBar();
+}
+
+// Called when the user taps ▶ Start Set — locks in rest time, begins set phase.
+window.tapStartSet = function() {
+  if (!timerState || timerState.phase !== 'rest') return;
+  const restSeconds = Math.round((Date.now() - timerState.restStartTime) / 1000);
+  if (activeWorkout?.exercises[timerState.fromEi]?.sets[timerState.fromSi]) {
+    activeWorkout.exercises[timerState.fromEi].sets[timerState.fromSi].restAfter = restSeconds;
+  }
+  clearInterval(timerState.intervalId);
+  timerState = {
+    phase:        'set',
+    setStartTime: Date.now(),
+    fromEi:       timerState.fromEi,
+    fromSi:       timerState.fromSi,
+    intervalId:   setInterval(tickTimer, 1000)
+  };
+  updateTimerBar();
+};
+
+window.addRestTime = function(seconds) {
+  if (timerState?.phase === 'rest') {
+    timerState.targetSeconds += seconds;
+    updateTimerBar();
+  }
+};
+
+function tickTimer() { updateTimerBar(); }
+
+function updateTimerBar() {
+  if (!timerState) return;
+  const phaseEl    = document.getElementById('timer-phase');
+  const countEl    = document.getElementById('timer-count');
+  const addBtnEl   = document.getElementById('timer-add-btn');
+  const startBtnEl = document.getElementById('timer-start-btn');
+
+  if (timerState.phase === 'rest') {
+    const elapsed   = Math.floor((Date.now() - timerState.restStartTime) / 1000);
+    const remaining = timerState.targetSeconds - elapsed;
+    phaseEl.textContent    = 'REST';
+    addBtnEl.style.display = '';
+    startBtnEl.style.display = '';
+    if (remaining > 0) {
+      countEl.textContent = formatTime(remaining);
+      countEl.className   = 'timer-count ' + (remaining > 30 ? 'timer-green' : remaining > 10 ? 'timer-orange' : 'timer-red');
+    } else {
+      countEl.textContent = '+' + formatTime(-remaining);
+      countEl.className   = 'timer-count timer-red';
+    }
+  } else {
+    const elapsed = Math.floor((Date.now() - timerState.setStartTime) / 1000);
+    phaseEl.textContent      = 'SET';
+    countEl.textContent      = formatTime(elapsed);
+    countEl.className        = 'timer-count timer-accent';
+    addBtnEl.style.display   = 'none';
+    startBtnEl.style.display = 'none';
+  }
+}
+
+function showTimerBar() {
+  document.getElementById('timer-bar').classList.add('visible');
+  document.getElementById('screen-workout').style.paddingTop = '68px';
+}
+
+function hideTimerBar() {
+  clearInterval(timerState?.intervalId);
+  timerState = null;
+  document.getElementById('timer-bar').classList.remove('visible');
+  document.getElementById('screen-workout').style.paddingTop = '';
+}
 
 // ─── PROGRESSION LOGIC ────────────────────────────────────────────────────────
 // Compares each set's actual RPE against its target RPE.
@@ -1423,8 +1760,19 @@ function getRecommendation(exerciseId, loggedSets) {
   const allAtTop       = setsWithRange.length > 0 && setsAtTop === setsWithRange.length;
   const mostBelowRange = setsWithRange.length > 0 && setsBelowRange > setsWithRange.length / 2;
 
+  // Rest time context — restAfter is stored on the set preceding the next set
+  const restValues = workSets.slice(0, -1).map(s => s.restAfter).filter(r => r > 0);
+  const avgRest    = restValues.length
+    ? Math.round(restValues.reduce((a, b) => a + b, 0) / restValues.length)
+    : null;
+  const longRests  = avgRest !== null && avgRest > 150;  // avg >2:30 — resting a lot
+  const shortRests = avgRest !== null && avgRest < 60;   // avg <1:00 — rushing
+
   // Intra-workout fatigue signal
   const fatigue = checkIntraFatigue(loggedSets);
+
+  // Unplanned weight drop signal (only among work sets, ignores backoff)
+  const drop = checkWeightDrop(loggedSets.filter(s => s.type === 'work'));
 
   let action, reason;
 
@@ -1432,6 +1780,10 @@ function getRecommendation(exerciseId, loggedSets) {
     // Couldn't hit even the bottom of the rep range — weight is too heavy
     action = 'backoff';
     reason = `Couldn't reach the minimum rep target — reduce weight by ${increment}lb next session.`;
+  } else if (drop) {
+    // Had to drop weight mid-exercise — use the dropped-to weight as the target
+    action = 'backoff';
+    reason = `Had to drop weight mid-session (${drop.fromWeight}lb → ${drop.toWeight}lb) — start at ${drop.toWeight}lb next session.`;
   } else if (allAtTop && avgDelta <= 0) {
     // Hit top of range at controlled effort — clear progression signal
     action = 'increase';
@@ -1462,6 +1814,26 @@ function getRecommendation(exerciseId, loggedSets) {
     reason = `Sets well above target RPE — reduce weight by ${drop}lb next session.`;
   }
 
+  // Tired-day forgiveness: RPE-based backoffs may just be fatigue, not weight being too heavy.
+  // Only override if the backoff wasn't triggered by a weight drop or missed reps.
+  if (activeWorkout?.readiness === 'tired' && action === 'backoff' && !drop && !mostBelowRange) {
+    action = 'stay';
+    reason = `Above target effort on a tired day — repeat this weight when feeling fresher.`;
+  }
+
+  // Rest time context: append a note or adjust action based on how long rests were
+  if (avgRest !== null) {
+    if (shortRests && action === 'backoff' && !drop && !mostBelowRange) {
+      // Short rests inflate RPE — don't back off, just rest more
+      action = 'stay';
+      reason = `Above target effort but rests were short (avg ${formatTime(avgRest)}) — try resting 1:30 and repeat this weight.`;
+    } else if (shortRests && action !== 'increase') {
+      reason += ` Avg rest was ${formatTime(avgRest)} — resting longer may help.`;
+    } else if (longRests) {
+      reason += ` Note: avg rest was ${formatTime(avgRest)}, which is long — weight may be heavier than the RPE suggests.`;
+    }
+  }
+
   return { action, reason, avgDelta, increment };
 }
 
@@ -1474,6 +1846,19 @@ function getRpeFeedback(actualRpe, targetRpe) {
   if (delta === 0)  return { text: "On target",                                  color: "#8bc34a" };
   if (delta === 1)  return { text: "Above target — focus on form",               color: "#ff9800" };
   return              { text: "Well above target — too heavy",                   color: "#f44336" };
+}
+
+// ─── UNPLANNED WEIGHT DROP DETECTION ─────────────────────────────────────────
+// Detects when you lower the weight mid-exercise across work sets.
+// Ignores warmup/backoff sets — only looks at type:'work'.
+function checkWeightDrop(exerciseSets) {
+  const workSets = exerciseSets.filter(s => s.type === 'work' && s.loggedWeight > 0);
+  if (workSets.length < 2) return null;
+  const firstWeight = workSets[0].loggedWeight;
+  const dropped = workSets.filter((s, i) => i > 0 && s.loggedWeight < firstWeight);
+  if (!dropped.length) return null;
+  const lowestWeight = Math.min(...dropped.map(s => s.loggedWeight));
+  return { fromWeight: firstWeight, toWeight: lowestWeight };
 }
 
 // ─── INTRA-WORKOUT FATIGUE DETECTION ─────────────────────────────────────────
@@ -1492,13 +1877,24 @@ function checkIntraFatigue(exerciseSets) {
     s.targetRPE && (RPE_VAL[s.rpe] - RPE_VAL[s.targetRPE]) >= 2
   ).length;
 
+  // Check if the RPE rise might just be explained by short rest
+  const prevSet     = workSets[workSets.length - 2];
+  const lastRestSec = prevSet?.restAfter;
+  const rushedRest  = lastRestSec > 0 && lastRestSec < 65;
+
   if (rise >= 2) {
+    if (rushedRest) {
+      return { level: 'medium', color: '#ff9800',
+        msg: `RPE jumped ${rise} levels — but you only rested ${formatTime(lastRestSec)}. Try resting 1:30 before next set.` };
+    }
     return { level: 'high', color: '#f44336',
       msg: `RPE jumped ${rise} levels across sets — rest longer (2–3 min) or drop weight on remaining sets.` };
   }
   if (rise === 1 && workSets.length >= 3) {
     return { level: 'medium', color: '#ff9800',
-      msg: `Fatigue building — make sure you\'re resting at least 90 seconds between sets.` };
+      msg: rushedRest
+        ? `Fatigue building and rest was short (${formatTime(lastRestSec)}) — aim for 1:30 between sets.`
+        : `Fatigue building — make sure you\'re resting at least 90 seconds between sets.` };
   }
   if (setsAboveTarget >= 2) {
     return { level: 'medium', color: '#ff9800',
@@ -1510,8 +1906,16 @@ function checkIntraFatigue(exerciseSets) {
 function updateFatigueAlert(ei) {
   const el = document.getElementById(`fatigue-${ei}`);
   if (!el || !activeWorkout) return;
-  const fatigue = checkIntraFatigue(activeWorkout.exercises[ei].sets);
-  if (fatigue) {
+  const sets   = activeWorkout.exercises[ei].sets;
+  const drop   = checkWeightDrop(sets);
+  const fatigue = checkIntraFatigue(sets);
+
+  // Weight drop takes priority — it's the stronger and more specific signal
+  if (drop) {
+    const color = '#f44336';
+    el.style.cssText = `margin:0 16px 12px;padding:10px 12px;border-radius:8px;font-size:12px;font-weight:600;color:${color};background:${color}18;border:1px solid ${color}44`;
+    el.textContent = `Weight dropped ${drop.fromWeight}lb → ${drop.toWeight}lb — noted for next session's recommendation.`;
+  } else if (fatigue) {
     el.style.cssText = `margin:0 16px 12px;padding:10px 12px;border-radius:8px;font-size:12px;font-weight:600;color:${fatigue.color};background:${fatigue.color}18;border:1px solid ${fatigue.color}44`;
     el.textContent = fatigue.msg;
   } else {
@@ -1780,6 +2184,7 @@ window.selectLift = function(id) { selectedLift = id; renderProgress(); };
 
 function renderChart(exerciseId) {
   const data = [];
+  let prWeight = 0;
   for (const w of [...allWorkouts].reverse()) {
     if (!w.exercises) continue;
     const ex = w.exercises.find(e => e.id === exerciseId);
@@ -1787,7 +2192,13 @@ function renderChart(exerciseId) {
     const workSets = ex.sets.filter(s => s.type === 'work');
     if (!workSets.length) continue;
     const maxW = Math.max(...workSets.map(s => s.loggedWeight || 0));
-    data.push({ date: w.dateISO, weight: maxW });
+    const ratedSets = workSets.filter(s => s.rpe && s.targetRPE);
+    const avgDelta = ratedSets.length
+      ? ratedSets.reduce((a, s) => a + (RPE_VAL[s.rpe]||2) - (RPE_VAL[s.targetRPE]||2), 0) / ratedSets.length
+      : null;
+    const isPR = maxW > prWeight;
+    if (isPR) prWeight = maxW;
+    data.push({ date: w.dateISO, weight: maxW, avgDelta, isPR });
   }
 
   const canvas = document.getElementById('progress-chart');
@@ -1800,48 +2211,85 @@ function renderChart(exerciseId) {
 
   if (data.length < 2) {
     ctx.fillStyle = '#888'; ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('Log at least 2 sessions to see chart', canvas.width / 2, H / 2);
+    ctx.fillText(data.length === 1 ? 'One more session to see the chart' : 'Log at least 2 sessions to see chart', canvas.width / 2, H / 2);
     document.getElementById('lift-rec').innerHTML = '';
     return;
   }
 
-  const minW = Math.min(...data.map(d => d.weight));
-  const maxW = Math.max(...data.map(d => d.weight));
-  const pad  = { top:20, bottom:40, left:44, right:20 };
-  const cW   = canvas.width - pad.left - pad.right;
-  const cH   = H - pad.top - pad.bottom;
+  const minW  = Math.min(...data.map(d => d.weight));
+  const maxW  = Math.max(...data.map(d => d.weight));
+  const pad   = { top:28, bottom:40, left:44, right:20 };
+  const cW    = canvas.width - pad.left - pad.right;
+  const cH    = H - pad.top - pad.bottom;
   const range = maxW - minW || 10;
-  const xP = i => pad.left + (i / (data.length-1)) * cW;
-  const yP = w => pad.top + cH - ((w - minW) / range) * cH;
+  const xP    = i => pad.left + (i / (data.length - 1)) * cW;
+  const yP    = w => pad.top + cH - ((w - minW) / range) * cH;
 
-  // Grid
-  ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) {
-    const y = pad.top + (i/4)*cH;
-    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(canvas.width-pad.right, y); ctx.stroke();
-    ctx.fillStyle='#666'; ctx.font='10px sans-serif'; ctx.textAlign='right';
-    ctx.fillText(Math.round(maxW - (i/4)*range)+'lb', pad.left-4, y+4);
+  // Dot color based on avg RPE delta for that session
+  function dotColor(delta) {
+    if (delta === null) return '#e8ff00';
+    if (delta <= 0)    return '#6fcf6f'; // on/below target
+    if (delta <= 1)    return '#ff9800'; // slightly above
+    return '#f44336';                    // well above
   }
 
-  // Line
-  ctx.beginPath(); ctx.strokeStyle='#e8ff00'; ctx.lineWidth=2.5; ctx.lineJoin='round';
-  data.forEach((d,i) => i===0 ? ctx.moveTo(xP(i),yP(d.weight)) : ctx.lineTo(xP(i),yP(d.weight)));
+  // Grid lines
+  ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + (i / 4) * cH;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(canvas.width - pad.right, y); ctx.stroke();
+    ctx.fillStyle = '#666'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(Math.round(maxW - (i / 4) * range) + 'lb', pad.left - 4, y + 4);
+  }
+
+  // Connecting line (subtle)
+  ctx.beginPath(); ctx.strokeStyle = '#444'; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+  data.forEach((d, i) => i === 0 ? ctx.moveTo(xP(i), yP(d.weight)) : ctx.lineTo(xP(i), yP(d.weight)));
   ctx.stroke();
 
-  // Dots + date labels
-  data.forEach((d,i) => {
-    ctx.beginPath(); ctx.arc(xP(i),yP(d.weight),5,0,Math.PI*2);
-    ctx.fillStyle='#e8ff00'; ctx.fill();
-    ctx.fillStyle='#666'; ctx.font='9px sans-serif'; ctx.textAlign='center';
-    ctx.fillText(d.date ? d.date.slice(5) : '', xP(i), H-8);
+  // Dots, PR markers, date labels
+  data.forEach((d, i) => {
+    const x = xP(i), y = yP(d.weight);
+    const col = dotColor(d.avgDelta);
+
+    // PR star above the dot
+    if (d.isPR) {
+      ctx.fillStyle = '#e8ff00';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('★', x, y - 10);
+    }
+
+    // Dot with dark outline for legibility
+    ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = col; ctx.fill();
+    ctx.strokeStyle = '#0f0f0f'; ctx.lineWidth = 1.5; ctx.stroke();
+
+    // Date label
+    ctx.fillStyle = '#666'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(d.date ? d.date.slice(5) : '', x, H - 8);
   });
 
-  // Progress note
-  const diff = data[data.length-1].weight - data[0].weight;
-  const sign = diff > 0 ? '+' : '';
-  const cls  = diff > 0 ? 'rec-increase' : diff < 0 ? 'rec-backoff' : 'rec-stay';
-  document.getElementById('lift-rec').innerHTML =
-    `<div class="rec-banner ${cls}">${EX[exerciseId]?.name || exerciseId} — ${sign}${diff}lb over ${data.length} sessions.</div>`;
+  // Summary banner + dot color legend
+  const diff    = data[data.length - 1].weight - data[0].weight;
+  const sign    = diff > 0 ? '+' : '';
+  const cls     = diff > 0 ? 'rec-increase' : diff < 0 ? 'rec-backoff' : 'rec-stay';
+  const latestD = data[data.length - 1].avgDelta;
+  const effortNote = latestD === null ? ''
+    : latestD <= 0  ? ' · Last session on target'
+    : latestD <= 1  ? ' · Last session slightly above target'
+    :                 ' · Last session above target';
+
+  document.getElementById('lift-rec').innerHTML = `
+    <div class="rec-banner ${cls}" style="margin-bottom:10px;">
+      ${EX[exerciseId]?.name || exerciseId} — ${sign}${diff}lb over ${data.length} sessions${effortNote}.
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);padding:0 2px;">
+      <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#6fcf6f;margin-right:4px;vertical-align:middle;"></span>On/below target</span>
+      <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ff9800;margin-right:4px;vertical-align:middle;"></span>Slightly above</span>
+      <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f44336;margin-right:4px;vertical-align:middle;"></span>Above target</span>
+      <span style="color:#e8ff00;">★ PR</span>
+    </div>`;
 }
 
 // ─── NAVIGATION ───────────────────────────────────────────────────────────────
