@@ -796,7 +796,7 @@ const EX = {
     muscle: "Hamstrings · Glutes",
     note: "Barbell. Push hips back. Feel the stretch. Soft knees.",
     increment: 5,
-    barWeight: 45,
+    barWeight: 45, plateOnly: true,
     sets: [
       { type:"work", reps:8, weight:135, targetRPE:"medium", label:"Set 1" },
       { type:"work", reps:8, weight:135, targetRPE:"medium", label:"Set 2" },
@@ -910,7 +910,7 @@ const EX = {
     muscle: "Biceps",
     note: "No swinging. Full control. Squeeze at top.",
     increment: 5,
-    barWeight: 45,
+    barWeight: 45, plateOnly: true,
     sets: [
       { type:"warmup", reps:8, weight:50, targetRPE:"easy",   label:"Warm-up" },
       { type:"work",   reps:5, weight:80, targetRPE:"hard",   label:"Top Set" },
@@ -923,6 +923,7 @@ const EX = {
     muscle: "Biceps",
     note: "Easier on wrists than straight bar. Control both directions.",
     increment: 5,
+    barWeight: 25, plateOnly: true,
     sets: [
       { type:"warmup", reps:8, weight:45, targetRPE:"easy",   label:"Warm-up" },
       { type:"work",   reps:6, weight:75, targetRPE:"hard",   label:"Top Set" },
@@ -981,7 +982,7 @@ const EX = {
     muscle: "Upper Chest · Shoulders",
     note: "Primary lift. No spotter — stop 1 rep shy of failure.",
     increment: 5,
-    barWeight: 45,
+    barWeight: 45, plateOnly: true,
     sets: [
       { type:"warmup", reps:10, weight:50,  targetRPE:"easy",   label:"Warm-up 1" },
       { type:"warmup", reps:6,  weight:70,  targetRPE:"easy",   label:"Warm-up 2" },
@@ -1050,7 +1051,7 @@ const EX = {
     muscle: "Triceps · Chest",
     note: "Hands shoulder-width. Elbows tucked. Control the bar.",
     increment: 5,
-    barWeight: 45,
+    barWeight: 45, plateOnly: true,
     sets: [
       { type:"warmup", reps:8,  weight:65,  targetRPE:"easy",   label:"Warm-up" },
       { type:"work",   reps:5,  weight:95,  targetRPE:"hard",   label:"Top Set" },
@@ -1085,6 +1086,7 @@ const EX = {
     muscle: "Triceps (long head)",
     note: "EZ bar or dumbbells. Lower to forehead. Full extension.",
     increment: 2.5,
+    barWeight: 25, plateOnly: true,
     sets: [
       { type:"warmup", reps:10, weight:45, targetRPE:"easy",   label:"Warm-up" },
       { type:"work",   reps:8,  weight:65, targetRPE:"medium", label:"Set 1" },
@@ -1261,6 +1263,16 @@ function getLastWeight(exerciseId, setIndex) {
   return null;
 }
 
+// Returns the recommendation from the most recent workout that logged this exercise.
+function getLastRec(exerciseId) {
+  for (const w of allWorkouts) {
+    if (!w.recommendations) continue;
+    const rec = w.recommendations.find(r => r.id === exerciseId);
+    if (rec?.rec) return rec.rec;
+  }
+  return null;
+}
+
 // ─── HOME ─────────────────────────────────────────────────────────────────────
 window.selectDay = function(day) {
   currentDay = day;
@@ -1431,10 +1443,15 @@ window.confirmWorkoutSwap = function(newExId) {
   const hasLogged = ex.sets.some(s => s.rpe);
   if (hasLogged && !confirm(`Swap to ${EX[newExId].name}? Logged sets for ${ex.name} will be cleared.`)) return;
 
-  const template = EX[newExId];
+  const template    = EX[newExId];
+  const lastRec     = getLastRec(newExId);
+  const weightDelta = lastRec?.weightDelta ?? 0;
   const sets = template.sets.map((s, si) => {
     const historyW = getLastWeight(newExId, si);
     let baseW = historyW !== null ? historyW : s.weight;
+    if (s.type !== 'warmup' && historyW !== null && weightDelta !== 0) {
+      baseW = Math.max(baseW + weightDelta, 5);
+    }
     if (isDeloadWeek()) baseW = applyDeload(baseW);
     return { ...s, loggedWeight: baseW, loggedReps: s.repsMin || s.reps, rpe: null };
   });
@@ -1473,10 +1490,16 @@ window.beginWorkout = function() {
       const exId    = selectedSlots[i];
       const template = EX[exId];
 
-      // Pass 1: fill weights from history / template defaults
+      // Pass 1: fill weights from history + apply last session's recommendation delta
+      const lastRec     = getLastRec(exId);
+      const weightDelta = lastRec?.weightDelta ?? 0;
       const sets = template.sets.map((s, si) => {
         const historyW = getLastWeight(exId, si);
         let baseW = historyW !== null ? historyW : s.weight;
+        // Apply recommendation delta to non-warmup sets (warmups are auto-calculated in pass 2)
+        if (s.type !== 'warmup' && historyW !== null && weightDelta !== 0) {
+          baseW = Math.max(baseW + weightDelta, 5);
+        }
         if (isDeloadWeek()) baseW = applyDeload(baseW);
         return { ...s, loggedWeight: baseW, loggedReps: s.repsMin || s.reps, rpe: null };
       });
@@ -1834,7 +1857,19 @@ function getRecommendation(exerciseId, loggedSets) {
     }
   }
 
-  return { action, reason, avgDelta, increment };
+  // Compute the lb delta to pre-fill next session's weights.
+  // Calculated AFTER all overrides (tired-day, short-rest) so it reflects the final action.
+  let weightDelta = 0;
+  if (action === 'increase') {
+    weightDelta = increment;
+  } else if (action === 'backoff') {
+    weightDelta = drop
+      ? drop.toWeight - Math.max(...workSets.map(s => s.loggedWeight))  // precise weight-drop target
+      : -(increment * 2);
+  }
+  // stay → weightDelta = 0
+
+  return { action, reason, avgDelta, increment, weightDelta };
 }
 
 // Per-set RPE vs target feedback shown live during workout
@@ -1976,12 +2011,19 @@ function getTrend(exerciseId) {
 }
 
 // ─── PLATE CALCULATOR ─────────────────────────────────────────────────────────
-function calcPlates(totalWeight, barWeight) {
-  const plateWeights = [45, 35, 25, 10, 5, 2.5];
-  let perSide = Math.round(((totalWeight - barWeight) / 2) * 100) / 100;
+// plateOnly exercises: entered weight = plates only (no bar counted).
+//   perSide = loggedWeight / 2
+// Non-plateOnly (e.g. leg press): entered weight includes sled/machine weight.
+//   perSide = (loggedWeight - barWeight) / 2
+// Available plates at this gym: 45, 35, 25, 10, 5
+function calcPlates(loggedWeight, barWeight, plateOnly) {
+  const available = [45, 35, 25, 10, 5];
+  let perSide = plateOnly
+    ? Math.round((loggedWeight / 2) * 100) / 100
+    : Math.round(((loggedWeight - barWeight) / 2) * 100) / 100;
   if (perSide <= 0) return [];
   const result = [];
-  for (const p of plateWeights) {
+  for (const p of available) {
     while (perSide >= p - 0.01) {
       result.push(p);
       perSide = Math.round((perSide - p) * 100) / 100;
@@ -2000,9 +2042,11 @@ function refreshSetFeedback(ei, si) {
   const parts = [];
 
   if (tmpl.barWeight) {
-    const plates  = calcPlates(set.loggedWeight, tmpl.barWeight);
+    const plates  = calcPlates(set.loggedWeight, tmpl.barWeight, tmpl.plateOnly);
     const sideStr = plates.length ? plates.join(' · ') : 'bar only';
-    const note    = tmpl.plateNote ? ` <span style="color:#555">(${tmpl.plateNote})</span>` : '';
+    const note    = tmpl.plateOnly
+      ? ` <span style="color:#555">(+${tmpl.barWeight}lb bar)</span>`
+      : tmpl.plateNote ? ` <span style="color:#555">(${tmpl.plateNote})</span>` : '';
     parts.push(`<span style="color:var(--muted)">🏋️ Per side: ${sideStr}${note}</span>`);
   }
 
