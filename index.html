@@ -738,7 +738,7 @@ const EX = {
     muscle: "Quads · Glutes",
     note: "Primary strength lift. Full depth, drive through heels.",
     increment: 10,
-    barWeight: 75, plateNote: "sled ≈75lb, varies by machine",
+    barWeight: 75, plateOnly: true, plateNote: "sled ≈75lb not counted",
     sets: [
       { type:"warmup",  reps:10, weight:270, targetRPE:"easy",   label:"Warm-up" },
       { type:"work",    reps:5,  weight:365, targetRPE:"hard",   label:"Set 1" },
@@ -2044,9 +2044,9 @@ function refreshSetFeedback(ei, si) {
   if (tmpl.barWeight) {
     const plates  = calcPlates(set.loggedWeight, tmpl.barWeight, tmpl.plateOnly);
     const sideStr = plates.length ? plates.join(' · ') : 'bar only';
-    const note    = tmpl.plateOnly
-      ? ` <span style="color:#555">(+${tmpl.barWeight}lb bar)</span>`
-      : tmpl.plateNote ? ` <span style="color:#555">(${tmpl.plateNote})</span>` : '';
+    const note    = tmpl.plateNote
+      ? ` <span style="color:#555">(${tmpl.plateNote})</span>`
+      : tmpl.plateOnly ? ` <span style="color:#555">(+${tmpl.barWeight}lb bar)</span>` : '';
     parts.push(`<span style="color:var(--muted)">🏋️ Per side: ${sideStr}${note}</span>`);
   }
 
