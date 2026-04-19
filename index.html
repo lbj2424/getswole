@@ -984,11 +984,11 @@ const EX = {
     increment: 5,
     barWeight: 45, plateOnly: true,
     sets: [
-      { type:"warmup", reps:10, weight:50,  targetRPE:"easy",   label:"Warm-up 1" },
-      { type:"warmup", reps:6,  weight:70,  targetRPE:"easy",   label:"Warm-up 2" },
-      { type:"work",   reps:5,  weight:100, targetRPE:"hard",   label:"Set 1" },
-      { type:"work",   reps:5,  weight:100, targetRPE:"hard",   label:"Set 2" },
-      { type:"backoff",reps:8,  weight:85,  targetRPE:"medium", label:"Back-off" },
+      { type:"warmup",  reps:10, weight:50,  targetRPE:"easy",   label:"Warm-up 1" },
+      { type:"warmup",  reps:6,  weight:70,  targetRPE:"easy",   label:"Warm-up 2" },
+      { type:"work",    repsMin:4, repsMax:6, weight:100, targetRPE:"hard", label:"Set 1" },
+      { type:"work",    repsMin:4, repsMax:6, weight:100, targetRPE:"hard", label:"Set 2" },
+      { type:"backoff", repsMin:6, repsMax:8, weight:85,  targetRPE:"medium", label:"Back-off" },
     ]
   },
   chest_press_machine: {
@@ -1263,12 +1263,48 @@ function getLastWeight(exerciseId, setIndex) {
   return null;
 }
 
-// Returns the recommendation from the most recent workout that logged this exercise.
+// Returns { weightDelta, dateISO } for the most recent workout that logged this exercise.
+// Derives weightDelta from action+increment when the field is missing (older saved workouts).
+// Returns null if no prior session found or last session was >21 days ago.
 function getLastRec(exerciseId) {
   for (const w of allWorkouts) {
-    if (!w.recommendations) continue;
-    const rec = w.recommendations.find(r => r.id === exerciseId);
-    if (rec?.rec) return rec.rec;
+    if (!w.exercises) continue;
+    const ex = w.exercises.find(e => e.id === exerciseId);
+    if (!ex) continue;
+    // Skip if last session was too long ago (>21 days) — don't auto-progress stale data
+    if (w.dateISO) {
+      const days = Math.floor((new Date() - new Date(w.dateISO)) / 86400000);
+      if (days > 21) return null;
+    }
+    const recEntry = w.recommendations?.find(r => r.id === exerciseId);
+    const rec = recEntry?.rec;
+    if (!rec) return { weightDelta: 0 };
+    // Use stored weightDelta if present; otherwise derive from action
+    if (typeof rec.weightDelta === 'number') return rec;
+    const inc = rec.increment || EX[exerciseId]?.increment || 5;
+    let weightDelta = 0;
+    if (rec.action === 'increase') weightDelta = inc;
+    else if (rec.action === 'backoff') weightDelta = -(inc * 2);
+    return { ...rec, weightDelta };
+  }
+  return null;
+}
+
+// Returns the raw progression signal ('increase'/'stay'/'backoff') from the most recent
+// stored recommendation for this exercise, used for the 2-session confirmation gate.
+function getPrevRawSignal(exerciseId) {
+  for (const w of allWorkouts) {
+    if (!w.exercises) continue;
+    const ex = w.exercises.find(e => e.id === exerciseId);
+    if (!ex) continue;
+    if (w.dateISO) {
+      const days = Math.floor((new Date() - new Date(w.dateISO)) / 86400000);
+      if (days > 21) return null;
+    }
+    if (!w.recommendations) return null;
+    const r = w.recommendations.find(r => r.id === exerciseId);
+    if (r?.rec) return r.rec.signal || r.rec.action;
+    return null;
   }
   return null;
 }
@@ -1565,7 +1601,10 @@ function renderWorkout() {
         const rangePlaceholder = s.repsMin ? `${s.repsMin}–${s.repsMax}` : 'reps';
         return `
         <div class="set-row">
-          <div class="set-num">${shortLabel(s.label)}</div>
+          <div class="set-num">
+            ${shortLabel(s.label)}
+            ${s.targetRPE && s.type !== 'warmup' ? `<div style="font-size:9px;color:var(--muted);font-weight:600;margin-top:2px;">@ ${RPE_LABEL[s.targetRPE]}</div>` : ''}
+          </div>
           <input class="set-input" type="number" inputmode="decimal"
             value="${s.loggedWeight}" placeholder="lbs"
             onchange="updateSet(${ei},${si},'loggedWeight',this.value)" />
@@ -1823,8 +1862,8 @@ function getRecommendation(exerciseId, loggedSets) {
     action = 'increase';
     reason = `Trending easier than target — add ${increment}lb next session.`;
   } else if (avgDelta === 0) {
-    action = 'increase';
-    reason = `Right on target — add ${increment}lb next session.`;
+    action = 'stay';
+    reason = `Right on target — nail this weight one more session, then add ${increment}lb.`;
   } else if (avgDelta <= 0.5 || aboveTarget <= totalWork / 2) {
     action = 'stay';
     reason = `A couple sets above target — repeat this weight and focus on cleaner reps.`;
@@ -1857,8 +1896,23 @@ function getRecommendation(exerciseId, loggedSets) {
     }
   }
 
+  // 2-session confirmation gate for soft increase signals.
+  // Strong signals (hit top of rep range, or consistently much easier) act immediately.
+  // Soft signals (slightly trending easier) require the previous session to also suggest increase.
+  const signal = action; // raw signal before gate
+  if (action === 'increase') {
+    const isStrongSignal = allAtTop || avgDelta <= -1;
+    if (!isStrongSignal) {
+      const prevSignal = getPrevRawSignal(exerciseId);
+      if (prevSignal !== 'increase') {
+        action = 'stay';
+        reason = `Trending easier — hold this weight one more session to confirm, then add ${increment}lb.`;
+      }
+    }
+  }
+
   // Compute the lb delta to pre-fill next session's weights.
-  // Calculated AFTER all overrides (tired-day, short-rest) so it reflects the final action.
+  // Calculated AFTER all overrides (tired-day, short-rest, confirmation gate).
   let weightDelta = 0;
   if (action === 'increase') {
     weightDelta = increment;
@@ -1869,7 +1923,7 @@ function getRecommendation(exerciseId, loggedSets) {
   }
   // stay → weightDelta = 0
 
-  return { action, reason, avgDelta, increment, weightDelta };
+  return { action, signal, reason, avgDelta, increment, weightDelta };
 }
 
 // Per-set RPE vs target feedback shown live during workout
